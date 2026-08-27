@@ -1,0 +1,35 @@
+# ============================================================
+#  Galamsey AI Detector — RUNTIME dependencies
+# ============================================================
+# Install into the project virtual environment ONLY:
+#
+#     python3 -m venv .venv
+#     ./.venv/bin/python -m pip install -r requirements.txt
+#
+# Versions below are the exact set verified working on
+# macOS 26 / Apple Silicon (arm64) / Python 3.12.11.
+#
+# Only DIRECT dependencies are listed. Transitive packages
+# (matplotlib, pandas, scipy, pillow, pyyaml, psutil, requests…)
+# are resolved by pip and deliberately NOT pinned here.
+# ------------------------------------------------------------
+
+# --- Web layer -----------------------------------------------
+flask==3.1.3                 # HTTP server for the detection API
+flask-cors==6.0.5             # lets the browser call a different port
+
+# --- Computer vision / deep learning -------------------------
+torch==2.13.0                # tensor engine; provides Apple MPS GPU support
+torchvision==0.28.0           # image ops required by ultralytics
+opencv-python==5.0.0.93      # camera capture, drawing, JPEG encoding
+numpy==2.5.2                # array maths (also a torch/cv2 dependency)
+
+# --- YOLO ----------------------------------------------------
+# Used for TRAINING and for any model trained with upstream Ultralytics.
+# NOTE: the current baseline weights (run 6) were produced by the
+# vendored fork in yolov12/ and can ONLY be run by that fork.
+# See docs/ARCHITECTURE.md -> "Two Ultralytics implementations".
+ultralytics==8.3.253
+
+# Required by the vendored yolov12/ fork at import time
+huggingface-hub==1.29.0

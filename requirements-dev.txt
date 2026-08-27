@@ -1,0 +1,14 @@
+# ============================================================
+#  Galamsey AI Detector — DEVELOPMENT dependencies
+# ============================================================
+# Not needed to run the application. Install with:
+#
+#     ./.venv/bin/python -m pip install -r requirements-dev.txt
+#
+# Kept separate from requirements.txt so a deployment (e.g. a
+# Raspberry Pi) does not have to install test/lint tooling.
+# ------------------------------------------------------------
+
+-r requirements.txt
+
+pytest>=8.0            # test runner for tests/
