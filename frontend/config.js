@@ -53,7 +53,9 @@ window.GALAMSEY_CONFIG = {
     // -----------------------------------------------------------
     // Google Maps
     // -----------------------------------------------------------
-    // Leave EMPTY here. Put the real key in config.local.js.
+    // Leave EMPTY here. The key comes from the backend's /client-config
+    // endpoint, which reads it from the git-ignored .env. config.local.js
+    // remains supported as a fallback for running without the backend.
     GOOGLE_MAPS_API_KEY: '',
     GOOGLE_MAPS_LIBRARIES: 'drawing,geometry,places',
 
@@ -97,6 +99,40 @@ window.GALAMSEY_RESOLVE_CONFIG = function () {
 };
 
 /**
+ * Fetch browser-safe configuration from the backend.
+ *
+ * The Google Maps key now lives in ONE place: the git-ignored .env at
+ * the project root. The backend reads it from the environment and
+ * serves it here, so no credential sits in any frontend file at all.
+ *
+ * config.local.js is still honoured as a fallback, so the map keeps
+ * working if you are running the frontend without the backend.
+ *
+ * To be explicit: this does NOT make the key secret. A browser Maps key
+ * is delivered to every visitor and can always be read from the network
+ * tab. It keeps the key out of version control and gives you one place
+ * to rotate it. Real protection is referrer + API restrictions and a
+ * quota cap in Google Cloud Console.
+ */
+window.GALAMSEY_FETCH_SERVER_CONFIG = async function () {
+    const cfg = window.GALAMSEY_RESOLVE_CONFIG();
+    try {
+        const response = await fetch(cfg.BACKEND_URL + '/client-config', { cache: 'no-store' });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const server = await response.json();
+        if (server.googleMapsApiKey) {
+            cfg.GOOGLE_MAPS_API_KEY = server.googleMapsApiKey;
+        }
+    } catch (error) {
+        console.warn(
+            '[galamsey] could not fetch /client-config from the backend (' +
+            error.message + '). Falling back to config.local.js if present.'
+        );
+    }
+    return cfg;
+};
+
+/**
  * Load the Google Maps JavaScript API.
  *
  * The inherited index.html loaded Maps with:
@@ -112,14 +148,15 @@ window.GALAMSEY_RESOLVE_CONFIG = function () {
  * @param {string} callbackName global function Maps should call
  * @returns {boolean} false if no API key is configured
  */
-window.GALAMSEY_LOAD_MAPS = function (callbackName) {
-    const cfg = window.GALAMSEY_RESOLVE_CONFIG();
+window.GALAMSEY_LOAD_MAPS = async function (callbackName) {
+    // Ask the backend for the key first; fall back to config.local.js.
+    const cfg = await window.GALAMSEY_FETCH_SERVER_CONFIG();
 
     if (!cfg.GOOGLE_MAPS_API_KEY) {
         console.warn(
             '[galamsey] No Google Maps API key configured. ' +
-            'Copy config.local.example.js to config.local.js and add your key. ' +
-            'The rest of the dashboard works without it.'
+            'Copy .env.example to .env and set GOOGLE_MAPS_API_KEY, ' +
+            'then restart the backend. The rest of the dashboard works without it.'
         );
         return false;
     }

@@ -31,5 +31,8 @@ numpy==2.5.2                # array maths (also a torch/cv2 dependency)
 # See docs/ARCHITECTURE.md -> "Two Ultralytics implementations".
 ultralytics==8.3.253
 
+# Loads secrets from the git-ignored .env (see .env.example)
+python-dotenv==1.2.3
+
 # Required by the vendored yolov12/ fork at import time
 huggingface-hub==1.29.0

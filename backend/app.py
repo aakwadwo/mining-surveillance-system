@@ -205,6 +205,7 @@ def index():
                 "GET /statistics": "detection counts for this session",
                 "GET /detections": "recent detection history",
                 "POST /api/detections": "submit a detection record",
+                "GET /client-config": "browser-safe config (Maps key)",
                 "GET /config": "current configuration",
                 "POST /config": "update the confidence threshold",
                 "GET /video_feed": "MJPEG stream with detections (needs a camera)",
@@ -212,6 +213,20 @@ def index():
             },
         }
     )
+
+
+@app.get("/client-config")
+def client_config():
+    """
+    Browser-safe configuration, including the Google Maps key.
+
+    The key lives in the git-ignored .env and is read from the
+    environment - it is never present in a committed file. Serving it
+    here does not make it secret (a browser key never is), but it does
+    keep it out of version control and puts every credential in ONE
+    place instead of scattered through HTML.
+    """
+    return jsonify(config.client_config())
 
 
 @app.get("/health")

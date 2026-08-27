@@ -42,6 +42,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# Load secrets from the git-ignored .env at the project root, so that
+# neither the backend nor the frontend ever carries a credential in a
+# committed file. See .env.example for the template.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:  # python-dotenv is optional; env vars still work
+    pass
+
 # ---------------------------------------------------------------
 # Paths — all derived from this file's own location
 # ---------------------------------------------------------------
@@ -131,6 +141,30 @@ CAMERA_FPS: int = int(os.getenv("GALAMSEY_CAMERA_FPS", "15"))
 
 # How many recent detections /detections keeps in memory.
 DETECTION_HISTORY_LIMIT: int = int(os.getenv("GALAMSEY_HISTORY", "100"))
+
+
+# ---------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------
+# Read from the environment (populated from .env). NEVER hardcode.
+GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+
+def client_config() -> dict:
+    """
+    The subset of configuration the BROWSER is allowed to receive.
+
+    Be deliberate about what goes in here: everything returned is public
+    to anyone who can reach the server. A Google Maps browser key is
+    already public by nature (it is embedded in every page that uses it),
+    so serving it costs nothing that was not already spent - but it must
+    never sit in a committed file, and no other secret may join it.
+    """
+    return {
+        "googleMapsApiKey": GOOGLE_MAPS_API_KEY,
+        "hasGoogleMapsKey": bool(GOOGLE_MAPS_API_KEY),
+        "backendUrl": f"http://{HOST}:{PORT}",
+    }
 
 
 def ensure_directories() -> None:
