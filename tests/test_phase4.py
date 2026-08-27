@@ -127,10 +127,30 @@ class TestTaxonomy:
         assert taxonomy.DATASET_NAMES[2] == "Person"
         assert taxonomy.DATASET_NAMES[5] == "Vehicle"
 
-    def test_upstream_typo_preserved_in_data_but_fixed_for_display(self):
-        """Ids and the wire name are frozen; the typo is corrected only for humans."""
-        assert taxonomy.DATASET_NAMES[3] == "ProcessingEquiment"   # dataset + weights
-        assert taxonomy.DISPLAY_NAMES[3] == "Processing Equipment"  # UI only
+    def test_class3_spelling_corrected_in_phase5(self):
+        """
+        Phase 4 preserved the upstream typo because the Run 6 weights carried
+        it. Phase 5 retrains, so the fix was applied everywhere at once:
+        taxonomy, both data.yaml files, frontend config, tests and docs.
+        Ids did not move; only the string changed.
+        """
+        assert taxonomy.DATASET_NAMES[3] == "ProcessingEquipment"
+        assert taxonomy.DISPLAY_NAMES[3] == "Processing Equipment"
+
+    def test_run6_legacy_spelling_still_accepted(self):
+        """
+        Run 6 is historical evidence and must remain loadable. Its old
+        spelling is a DOCUMENTED alias, not a silenced mismatch.
+        """
+        names = dict(enumerate(taxonomy.DATASET_NAMES))
+        names[3] = "ProcessingEquiment"
+        assert taxonomy.verify_against_model(names) == []
+
+    def test_aliases_do_not_hide_real_mismatches(self):
+        """An alias must never let a genuinely different taxonomy through."""
+        names = dict(enumerate(taxonomy.DATASET_NAMES))
+        names[3] = "WashPlant"
+        assert taxonomy.verify_against_model(names)
 
     def test_verify_against_model_accepts_matching_names(self):
         assert taxonomy.verify_against_model(dict(enumerate(taxonomy.DATASET_NAMES))) == []

@@ -72,7 +72,7 @@ window.GALAMSEY_CONFIG = {
         { id: 0, name: 'ExcavationMachinery', display: 'Excavation Machinery' },
         { id: 1, name: 'MiningTool',          display: 'Mining Tool' },
         { id: 2, name: 'Person',              display: 'Person' },
-        { id: 3, name: 'ProcessingEquiment',  display: 'Processing Equipment' },
+        { id: 3, name: 'ProcessingEquipment', display: 'Processing Equipment' },
         { id: 4, name: 'Structure',           display: 'Structure' },
         { id: 5, name: 'Vehicle',             display: 'Vehicle' }
     ],

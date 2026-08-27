@@ -34,22 +34,28 @@ Confirmed embedded in the baseline weights
              runs/train_illegal_mining/yolov12_illegal_mining6/weights/best.pt
 
 ------------------------------------------------------------------
-THE "ProcessingEquiment" SPELLING
+THE "ProcessingEquipment" SPELLING  (corrected in Phase 5)
 ------------------------------------------------------------------
-Class 3 is spelled "ProcessingEquiment" in the source dataset — the
-'p' in "Equipment" is missing. This typo originates upstream, in the
-Roboflow project, and is baked into the trained weights.
+Class 3 was spelled "ProcessingEquiment" — missing the 'p' — in the
+original Roboflow project, in Dataset A's data.yaml, and inside the
+Run 6 baseline weights.
 
-We do NOT correct it in data.yaml, because:
-  * the numeric id is what actually matters, and it must not move;
-  * the weights embed the misspelling, so changing data.yaml would
-    desynchronise the dataset from the model;
-  * renaming would give a false impression that the model was
-    retrained when it was not.
+Phase 4 deliberately preserved the typo, because correcting the name in
+one place while the weights still carried the old spelling would
+desynchronise data from model. That was the right call at the time.
 
-Instead the typo is corrected at the PRESENTATION layer only, via
-DISPLAY_NAMES. Storage/wire format keeps the dataset spelling.
-Fix it properly at the source when the model is next retrained.
+Phase 5 retrains the model on a rebuilt dataset, which is exactly the
+moment the correction can be made SAFELY and SYNCHRONOUSLY across:
+    this file, dataset-phase5/data.yaml, "illegal mining activities"/
+    data.yaml, frontend/config.js, the tests, and the documentation.
+
+The numeric ids did NOT move. Only the human-readable string changed.
+
+Run 6 still carries the old spelling and is retained as historical
+evidence, so LEGACY_NAME_ALIASES below lets verify_against_model()
+accept it with a warning instead of rejecting a model that is otherwise
+perfectly valid. Aliases are for KNOWN, DOCUMENTED spelling changes
+only - never a place to paper over a genuine taxonomy mismatch.
 """
 
 from __future__ import annotations
@@ -62,7 +68,7 @@ DATASET_NAMES: tuple[str, ...] = (
     "ExcavationMachinery",   # 0
     "MiningTool",            # 1
     "Person",                # 2
-    "ProcessingEquiment",    # 3  <-- upstream typo, deliberately preserved
+    "ProcessingEquipment",   # 3  (typo "ProcessingEquiment" fixed in Phase 5)
     "Structure",             # 4
     "Vehicle",               # 5
 )
@@ -76,9 +82,21 @@ DISPLAY_NAMES: dict[int, str] = {
     0: "Excavation Machinery",
     1: "Mining Tool",
     2: "Person",
-    3: "Processing Equipment",   # typo corrected for display only
+    3: "Processing Equipment",
     4: "Structure",
     5: "Vehicle",
+}
+
+# ---------------------------------------------------------------
+# 2b. Known historical spellings, accepted with a warning.
+#
+#     ONLY for documented renames where the CONCEPT and the ID are
+#     unchanged. Never add an entry to silence a real mismatch: two
+#     models disagreeing about what class 3 MEANS is precisely the
+#     failure this module exists to prevent.
+# ---------------------------------------------------------------
+LEGACY_NAME_ALIASES: dict[int, set[str]] = {
+    3: {"ProcessingEquiment"},   # pre-Phase-5 spelling (Run 6 weights)
 }
 
 # ---------------------------------------------------------------
@@ -164,6 +182,9 @@ def verify_against_model(model_names: dict[int, str]) -> list[str]:
     system prints would be wrong while nothing errors. Callers must
     treat a non-empty result as a hard failure, not a warning.
 
+    Documented historical spellings (LEGACY_NAME_ALIASES) are accepted,
+    so the Run 6 baseline still loads after the Phase 5 rename.
+
     Returns a list of human-readable problems; empty list == match.
     """
     problems: list[str] = []
@@ -180,6 +201,9 @@ def verify_against_model(model_names: dict[int, str]) -> list[str]:
         if actual is None:
             problems.append(f"class {cid}: missing from model (expected {expected!r})")
         elif actual != expected:
+            if actual in LEGACY_NAME_ALIASES.get(cid, set()):
+                # Documented historical spelling. Same id, same concept.
+                continue
             problems.append(
                 f"class {cid}: model says {actual!r}, taxonomy expects {expected!r}"
             )

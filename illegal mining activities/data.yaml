@@ -3,7 +3,7 @@ val: valid/images
 test: test/images
 
 nc: 6
-names: ['ExcavationMachinery', 'MiningTool', 'Person', 'ProcessingEquiment', 'Structure', 'Vehicle']
+names: ['ExcavationMachinery', 'MiningTool', 'Person', 'ProcessingEquipment', 'Structure', 'Vehicle']
 
 roboflow:
   workspace: galamsey-zutez
