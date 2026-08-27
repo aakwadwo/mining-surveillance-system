@@ -507,3 +507,195 @@ class TestPhase5Model:
         names = {int(k): v for k, v in json.loads(result.stdout.strip().splitlines()[-1]).items()}
         assert names == dict(enumerate(taxonomy.DATASET_NAMES))
         assert taxonomy.verify_against_model(names) == []
+
+
+# ===============================================================
+# H. Phase 6 — the real inference API (/api/detect)
+# ===============================================================
+def _a_real_test_image() -> Path:
+    """A genuine photograph from the Phase 5 test split."""
+    d = PROJECT_ROOT / "dataset-phase5" / "test" / "images"
+    images = sorted(p for p in d.iterdir()
+                    if p.suffix.lower() == ".jpg" and not p.name.startswith("."))
+    assert images, "no test images found"
+    return images[0]
+
+
+@pytest.fixture(scope="module")
+def detect_response(client):
+    """
+    One real inference, reused across assertions.
+
+    Deliberately a REAL photograph through the REAL model - these tests
+    are worthless if they assert against a fixture of canned numbers.
+    """
+    img = _a_real_test_image()
+    with img.open("rb") as fh:
+        r = client.post("/api/detect", data={"image": (fh, img.name)},
+                        content_type="multipart/form-data")
+    assert r.status_code == 200, r.get_data(as_text=True)[:500]
+    return r.get_json(), img
+
+
+class TestDetectAPI:
+    def test_success_and_not_synthetic(self, detect_response):
+        """The default path must run the real model, never mock data."""
+        body, _ = detect_response
+        assert body["success"] is True
+        assert body["synthetic"] is False, "live detection must not be synthetic"
+        assert "warning" not in body or body["warning"] is None
+
+    def test_returns_detections(self, detect_response):
+        body, _ = detect_response
+        assert isinstance(body["detections"], list)
+        assert body["detections"], "the model found nothing in a known-populated image"
+
+    def test_every_detection_has_the_contract_fields(self, detect_response):
+        body, _ = detect_response
+        for d in body["detections"]:
+            assert set(d) == {"class_id", "class_name", "confidence", "bbox"}
+
+    def test_bbox_has_named_corners(self, detect_response):
+        body, _ = detect_response
+        for d in body["detections"]:
+            assert set(d["bbox"]) == {"x1", "y1", "x2", "y2"}
+
+    def test_image_dimensions_match_the_actual_file(self, detect_response):
+        """Reported dimensions must describe the image that was sent."""
+        body, img = detect_response
+        from PIL import Image
+
+        with Image.open(img) as im:
+            width, height = im.size
+        assert body["image_width"] == width
+        assert body["image_height"] == height
+
+    def test_boxes_lie_inside_the_image(self, detect_response):
+        """A box outside the frame means the coordinate space is wrong."""
+        body, _ = detect_response
+        w, h = body["image_width"], body["image_height"]
+        for d in body["detections"]:
+            b = d["bbox"]
+            assert 0 <= b["x1"] < b["x2"] <= w, f"bad x range {b} for width {w}"
+            assert 0 <= b["y1"] < b["y2"] <= h, f"bad y range {b} for height {h}"
+
+    def test_confidence_is_a_probability(self, detect_response):
+        body, _ = detect_response
+        for d in body["detections"]:
+            assert 0.0 < d["confidence"] <= 1.0
+
+    def test_confidence_respects_the_threshold(self, detect_response):
+        body, _ = detect_response
+        for d in body["detections"]:
+            assert d["confidence"] >= config.CONFIDENCE_THRESHOLD - 1e-6
+
+    def test_classes_are_the_project_taxonomy(self, detect_response):
+        """
+        Guards the failure this project has been bitten by: a model and an
+        app disagreeing about what an integer means.
+        """
+        body, _ = detect_response
+        for d in body["detections"]:
+            assert taxonomy.is_valid_class_id(d["class_id"])
+            assert d["class_name"] == taxonomy.dataset_name(d["class_id"])
+            assert d["class_name"] in taxonomy.DATASET_NAMES
+
+    def test_inference_time_is_reported_and_plausible(self, detect_response):
+        body, _ = detect_response
+        t = body["inference_time_ms"]
+        assert isinstance(t, (int, float))
+        assert 0 < t < 60_000, f"implausible inference time {t} ms"
+
+    # -- failure modes -------------------------------------------
+    def test_missing_image_is_400_not_500(self, client):
+        r = client.post("/api/detect", data={}, content_type="multipart/form-data")
+        assert r.status_code == 400
+        assert r.get_json()["success"] is False
+
+    def test_empty_upload_is_400(self, client):
+        import io
+
+        r = client.post("/api/detect", data={"image": (io.BytesIO(b""), "empty.jpg")},
+                        content_type="multipart/form-data")
+        assert r.status_code == 400
+
+    def test_undecodable_bytes_are_400(self, client):
+        import io
+
+        r = client.post("/api/detect",
+                        data={"image": (io.BytesIO(b"this is not an image"), "x.jpg")},
+                        content_type="multipart/form-data")
+        assert r.status_code == 400
+        assert "decode" in r.get_json()["error"].lower()
+
+    def test_json_body_instead_of_an_image_is_400(self, client):
+        r = client.post("/api/detect", json={"oops": True})
+        assert r.status_code == 400
+
+    def test_a_bad_request_never_returns_500(self, client):
+        """Malformed input must be distinguishable from a broken server."""
+        import io
+
+        for data, ctype in (
+            ({}, "multipart/form-data"),
+            ({"image": (io.BytesIO(b""), "a.jpg")}, "multipart/form-data"),
+            ({"image": (io.BytesIO(b"\x00\x01\x02"), "a.jpg")}, "multipart/form-data"),
+            ({"wrongfield": (io.BytesIO(b"x"), "a.jpg")}, "multipart/form-data"),
+        ):
+            r = client.post("/api/detect", data=data, content_type=ctype)
+            assert r.status_code == 400, f"expected 400, got {r.status_code}"
+
+    def test_model_unavailable_returns_503(self, client, monkeypatch):
+        """
+        A missing model is a 503 (server fine, this resource unavailable),
+        never a 500 and never silently-substituted fake detections.
+        """
+        import app as backend_app
+
+        monkeypatch.setattr(backend_app.detector, "mode", "unavailable")
+        monkeypatch.setattr(backend_app.detector, "model_error", "simulated for test")
+        img = _a_real_test_image()
+        with img.open("rb") as fh:
+            r = client.post("/api/detect", data={"image": (fh, img.name)},
+                            content_type="multipart/form-data")
+        assert r.status_code == 503
+        body = r.get_json()
+        assert body["success"] is False
+        assert "unavailable" in body["error"]
+
+    def test_raw_image_body_is_accepted(self, client):
+        img = _a_real_test_image()
+        r = client.post("/api/detect", data=img.read_bytes(), content_type="image/jpeg")
+        assert r.status_code == 200
+        assert r.get_json()["success"] is True
+
+    # -- backwards compatibility ---------------------------------
+    def test_legacy_detect_alias_keeps_its_old_shape(self, client):
+        """/detect must not break for anything written against Phase 4."""
+        img = _a_real_test_image()
+        with img.open("rb") as fh:
+            r = client.post("/detect", data={"image": (fh, img.name)},
+                            content_type="multipart/form-data")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert "image" in body and "width" in body["image"]
+        assert isinstance(body["detections"][0]["bbox"], list)
+        assert len(body["detections"][0]["bbox"]) == 4
+
+    def test_both_routes_agree(self, client):
+        """Same model, same code path - they must report the same thing."""
+        img = _a_real_test_image()
+        with img.open("rb") as fh:
+            new = client.post("/api/detect", data={"image": (fh, img.name)},
+                              content_type="multipart/form-data").get_json()
+        with img.open("rb") as fh:
+            old = client.post("/detect", data={"image": (fh, img.name)},
+                              content_type="multipart/form-data").get_json()
+        assert len(new["detections"]) == old["count"]
+        assert new["image_width"] == old["image"]["width"]
+        for a, b in zip(new["detections"], old["detections"]):
+            assert a["class_id"] == b["class_id"]
+            assert [a["bbox"]["x1"], a["bbox"]["y1"], a["bbox"]["x2"], a["bbox"]["y2"]] == b["bbox"]
+
+    def test_index_advertises_the_endpoint(self, client):
+        assert "POST /api/detect" in client.get("/").get_json()["endpoints"]
