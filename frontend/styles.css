@@ -2071,3 +2071,63 @@ html:-ms-fullscreen {
         height: 150px;
     }
 }
+
+
+/* ==========================================================
+   Live detection overlay  (live-detection.js)
+   ==========================================================
+   Boxes drawn from real /api/detect responses. Deliberately a
+   separate class from .detection-box, whose dark blurred fill was
+   designed as a standalone panel and would obscure the very object
+   it marks. These are outlines: the picture stays visible. */
+.live-box {
+    position: absolute;
+    border: 2px solid var(--primary-color);
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 0 12px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+.live-box__label {
+    position: absolute;
+    top: -1.35rem;
+    left: -2px;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    color: #0a0a0a;
+    background: var(--primary-color);
+    border-radius: 3px 3px 0 0;
+}
+
+/* A box near the top of the frame would push its label off-screen,
+   so flip the label inside the box instead. */
+.live-box__label--below {
+    top: auto;
+    bottom: -1.35rem;
+    border-radius: 0 0 3px 3px;
+}
+
+/* Colour by class, using the palette already defined in :root.
+   Strong mining indicators are warm, contextual objects are cool. */
+.live-box--c0 { border-color: #FF4444; }                     /* ExcavationMachinery */
+.live-box--c0 .live-box__label { background: #FF4444; color: #fff; }
+.live-box--c1 { border-color: var(--warning-color); }        /* MiningTool */
+.live-box--c1 .live-box__label { background: var(--warning-color); }
+.live-box--c2 { border-color: #4FC3F7; }                     /* Person */
+.live-box--c2 .live-box__label { background: #4FC3F7; }
+.live-box--c3 { border-color: #FF4444; }                     /* ProcessingEquipment */
+.live-box--c3 .live-box__label { background: #FF4444; color: #fff; }
+.live-box--c4 { border-color: #CE93D8; }                     /* Structure */
+.live-box--c4 .live-box__label { background: #CE93D8; }
+.live-box--c5 { border-color: var(--primary-color); }        /* Vehicle */
+.live-box--c5 .live-box__label { background: var(--primary-color); }
+
+.tool-item .confidence {
+    flex: 0 0 auto;
+    font-weight: 600;
+    color: var(--primary-color);
+}

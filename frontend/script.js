@@ -1336,6 +1336,11 @@ Powered by YOLOv8 + GeoAI
             webcamToggle.title = 'Stop Webcam';
             this.updateFeedVisibility();
             this.showToast('Webcam started successfully', 'legal');
+
+            // PHASE 6: start sending frames to the real model.
+            // Before this, the camera was displayed but never analysed -
+            // the detection UI had no data source at all.
+            this.startLiveDetection();
             
             // Update frame counter periodically
             this.startFrameCounter();
@@ -1356,6 +1361,29 @@ Powered by YOLOv8 + GeoAI
         }
     }
 
+    /**
+     * PHASE 6 - live inference lifecycle.
+     *
+     * live-detection.js owns the capture/infer/render loop. It is kept in
+     * its own file because it is the one genuinely new subsystem in this
+     * phase, and burying ~350 lines of it inside this 4000-line class
+     * would make it much harder to read or reason about.
+     */
+    startLiveDetection() {
+        if (!window.GalamseyLiveDetection) {
+            console.warn('[galamsey] live-detection.js not loaded; camera will not be analysed');
+            return;
+        }
+        if (!this.liveDetection) {
+            this.liveDetection = new window.GalamseyLiveDetection(this);
+        }
+        this.liveDetection.start();
+    }
+
+    stopLiveDetection() {
+        if (this.liveDetection) this.liveDetection.stop();
+    }
+
     // Stop webcam feed
     stopWebcam() {
         const webcamVideo = document.getElementById('webcamVideo');
@@ -1374,7 +1402,12 @@ Powered by YOLOv8 + GeoAI
         }
 
         this.isWebcamActive = false;
-        
+
+        // PHASE 6: stop inference when the camera stops. Continuing to
+        // POST blank frames would waste the backend and leave stale
+        // boxes floating over a dead video element.
+        this.stopLiveDetection();
+
         // Update UI
         if (webcamToggle) {
             webcamToggle.innerHTML = '<i class="fas fa-video"></i>';
@@ -3844,6 +3877,17 @@ Powered by YOLOv8 + GeoAI
             }
         );
 
+        // FIXED: this assignment used to OVERWRITE geolocationWatchId
+        // without clearing the previous watch, so every retry left another
+        // live watch running. Each orphaned watch kept timing out, and each
+        // timeout scheduled another retry - watches multiplied until the
+        // screen was a solid wall of "Location request timeout" toasts.
+        // Always release the old watch before creating a new one.
+        if (this.geolocationWatchId !== null) {
+            navigator.geolocation.clearWatch(this.geolocationWatchId);
+            this.geolocationWatchId = null;
+        }
+
         // Watch position for continuous updates
         this.geolocationWatchId = navigator.geolocation.watchPosition(
             (position) => {
@@ -3930,13 +3974,31 @@ Powered by YOLOv8 + GeoAI
                 break;
             case error.TIMEOUT:
                 errorMessage += 'Request timeout.';
-                this.showToast('Location request timeout. Trying again...', 'analyzing');
-                // Retry after a delay
-                setTimeout(() => {
-                    if (this.useDeviceLocation) {
-                        this.startDeviceLocationTracking();
-                    }
-                }, 5000);
+                // FIXED: this retried forever and toasted every single time.
+                // Geolocation legitimately never resolves on a desktop with
+                // no GPS and no location service, so an unbounded retry is a
+                // guaranteed infinite loop. Cap the attempts and say so once.
+                this._geoTimeouts = (this._geoTimeouts || 0) + 1;
+                if (this._geoTimeouts === 1) {
+                    this.showToast('Location request timed out. Retrying...', 'analyzing');
+                }
+                if (this._geoTimeouts <= 3) {
+                    setTimeout(() => {
+                        if (this.useDeviceLocation) {
+                            this.startDeviceLocationTracking();
+                        }
+                    }, 5000);
+                } else if (this._geoTimeouts === 4) {
+                    this.stopDeviceLocationTracking();
+                    this.useDeviceLocation = false;
+                    this.showToast(
+                        'Device location unavailable - map will use the default centre. ' +
+                        'Detection is unaffected.',
+                        'analyzing'
+                    );
+                    const gps = document.getElementById('gpsLocation');
+                    if (gps) gps.textContent = 'Location unavailable';
+                }
                 break;
             default:
                 errorMessage += 'Unknown error.';

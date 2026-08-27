@@ -44,8 +44,26 @@ window.GALAMSEY_CONFIG = {
     // Where backend/app.py is listening. Must match config.py PORT.
     BACKEND_URL: 'http://127.0.0.1:5004',
 
-    // Poll interval for pulling detections from the backend (ms).
+    // Poll interval for pulling statistics from the backend (ms).
     POLL_INTERVAL_MS: 5000,
+
+    // -----------------------------------------------------------
+    // Live camera inference  (see live-detection.js)
+    // -----------------------------------------------------------
+    // How often a camera frame is sent to /api/detect.
+    //   faster  -> boxes track reality more closely, backend busier
+    //   slower  -> nearly free, but boxes lag what you can see
+    // Inference takes ~110 ms, so 1500 ms leaves the backend ~93% idle
+    // while still feeling current for scenes that change at human speed.
+    DETECTION_INTERVAL_MS: 1500,
+
+    // Frames are downscaled to this width before being sent. The model
+    // resizes everything to 640x640 internally, so shipping a 1920px
+    // frame costs bandwidth and encode time for no extra accuracy.
+    // Aspect ratio is preserved, which is what keeps the returned
+    // coordinates mappable back onto the displayed video.
+    DETECTION_MAX_WIDTH: 960,
+    DETECTION_JPEG_QUALITY: 0.8,
 
     // Send detection records to the backend as they occur.
     SEND_DETECTIONS: true,

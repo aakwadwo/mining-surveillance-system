@@ -81,3 +81,6 @@ yolov12*.pt
 #   yolov12/                    5.4 MB  — vendored upstream source
 #   Front end /                 280 KB  — the application
 #   backend/*.py                        — the application
+
+# Temporary verification sample images (never committed)
+frontend/devsample/
