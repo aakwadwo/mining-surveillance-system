@@ -65,6 +65,7 @@ YOLOV12_DIR: Path = PROJECT_ROOT / "yolov12"        # vendored upstream fork
 
 MODELS_DIR: Path = BACKEND_DIR / "models"
 DATA_DIR: Path = BACKEND_DIR / "data"               # detection history
+HISTORY_DB: Path = Path(os.getenv("GALAMSEY_HISTORY_DB", DATA_DIR / "detections.db"))
 LOGS_DIR: Path = BACKEND_DIR / "logs"
 
 # The production model. See backend/models/PROVENANCE.md.
@@ -152,8 +153,12 @@ CAMERA_WIDTH: int = int(os.getenv("GALAMSEY_CAMERA_WIDTH", "640"))
 CAMERA_HEIGHT: int = int(os.getenv("GALAMSEY_CAMERA_HEIGHT", "480"))
 CAMERA_FPS: int = int(os.getenv("GALAMSEY_CAMERA_FPS", "15"))
 
-# How many recent detections /detections keeps in memory.
+# Default page size for GET /detections.
 DETECTION_HISTORY_LIMIT: int = int(os.getenv("GALAMSEY_HISTORY", "100"))
+
+# Hard cap on stored events, so a long-running server cannot fill
+# the disk. Oldest rows are trimmed first.
+HISTORY_MAX_EVENTS: int = int(os.getenv("GALAMSEY_HISTORY_MAX", "5000"))
 
 
 # ---------------------------------------------------------------
@@ -226,6 +231,8 @@ def as_dict() -> dict:
         "port": PORT,
         "debug": DEBUG,
         "cors_origins": CORS_ORIGINS,
+        "history_db": str(HISTORY_DB),
+        "history_max_events": HISTORY_MAX_EVENTS,
         "camera_enabled": CAMERA_ENABLED,
         "camera_index": CAMERA_INDEX,
     }

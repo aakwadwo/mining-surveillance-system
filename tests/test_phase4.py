@@ -699,3 +699,137 @@ class TestDetectAPI:
 
     def test_index_advertises_the_endpoint(self, client):
         assert "POST /api/detect" in client.get("/").get_json()["endpoints"]
+
+
+# ===============================================================
+# I. Phase 6 — persistent detection history
+# ===============================================================
+class TestDetectionHistoryStore:
+    """
+    Tests the store directly, against a temporary database.
+
+    Kept separate from the API tests so a failure tells you WHICH layer
+    broke: the storage or the route that uses it.
+    """
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        from history import DetectionHistory
+
+        return DetectionHistory(tmp_path / "test.db", max_events=50)
+
+    def test_creates_its_database_file(self, store):
+        assert store.db_path.exists()
+        assert store.count() == 0
+
+    def test_records_and_reads_back(self, store):
+        event_id = store.record(
+            [{"class_id": 2, "class_name": "Person", "confidence": 0.9,
+              "bbox": {"x1": 1, "y1": 2, "x2": 3, "y2": 4}}],
+            {"source": "test", "image_width": 640, "image_height": 480,
+             "inference_time_ms": 12.3},
+        )
+        assert event_id is not None
+        assert store.count() == 1
+
+        event = store.recent(10)[0]
+        assert event["detection_count"] == 1
+        assert event["image_width"] == 640
+        assert event["inference_time_ms"] == 12.3
+        assert event["detections"][0]["class_name"] == "Person"
+        assert event["detections"][0]["bbox"] == {"x1": 1, "y1": 2, "x2": 3, "y2": 4}
+
+    def test_survives_reopening_the_database(self, tmp_path):
+        """The whole point: a new process must see the old events."""
+        from history import DetectionHistory
+
+        db = tmp_path / "persist.db"
+        first = DetectionHistory(db)
+        first.record([{"class_name": "Vehicle", "confidence": 0.7}], {"source": "test"})
+        assert first.count() == 1
+
+        # A completely separate instance, as a restarted backend would be.
+        second = DetectionHistory(db)
+        assert second.count() == 1
+        assert second.recent(1)[0]["detections"][0]["class_name"] == "Vehicle"
+
+    def test_empty_frames_are_not_events(self, store):
+        """~2400 empty frames an hour must not become 2400 rows."""
+        assert store.record([], {"source": "test"}) is None
+        assert store.count() == 0
+
+    def test_consecutive_identical_results_are_deduplicated(self, store):
+        payload = [{"class_name": "Person", "confidence": 0.9}]
+        assert store.record(payload, {"source": "test"}) is not None
+        assert store.record(payload, {"source": "test"}) is None
+        assert store.record(payload, {"source": "test"}) is None
+        assert store.count() == 1
+
+    def test_a_different_result_is_a_new_event(self, store):
+        store.record([{"class_name": "Person", "confidence": 0.9}], {"source": "t"})
+        store.record([{"class_name": "Person", "confidence": 0.9},
+                      {"class_name": "Vehicle", "confidence": 0.8}], {"source": "t"})
+        assert store.count() == 2
+
+    def test_force_bypasses_both_filters(self, store):
+        """Explicit client submissions are deliberate acts, not sampling."""
+        assert store.record([], {"source": "frontend"}, force=True) is not None
+        payload = [{"class_name": "Person", "confidence": 0.9}]
+        store.record(payload, {"source": "frontend"}, force=True)
+        store.record(payload, {"source": "frontend"}, force=True)
+        assert store.count() == 3
+
+    def test_signature_accepts_either_field_name(self, store):
+        """/api/detect sends class_name; the frontend contract sends type."""
+        assert store._signature([{"class_name": "Person"}]) == "Person:1"
+        assert store._signature([{"type": "Person"}]) == "Person:1"
+        assert store._signature([{"class_name": "Person"}, {"type": "Person"}]) == "Person:2"
+
+    def test_retention_cap_is_enforced(self, store):
+        """A long-running server must not fill the disk."""
+        for i in range(80):
+            store.record([{"class_name": f"C{i}", "confidence": 0.5}], {"source": "t"})
+        assert store.count() <= store.max_events
+
+    def test_summary_aggregates(self, store):
+        store.record([{"class_name": "Person"}, {"class_name": "Person"}], {"source": "t"})
+        store.record([{"class_name": "Vehicle"}], {"source": "t"})
+        s = store.summary()
+        assert s["total_events"] == 2
+        assert s["total_objects"] == 3
+        assert s["by_class_recent"]["Person"] == 2
+
+    def test_clear_empties_it(self, store):
+        store.record([{"class_name": "Person"}], {"source": "t"})
+        assert store.clear() == 1
+        assert store.count() == 0
+
+
+class TestHistoryAPI:
+    def test_detections_endpoint_reports_persistence(self, client):
+        body = client.get("/detections").get_json()
+        assert body["persistent"] is True
+        assert "total_stored" in body
+        assert body["storage"].endswith(".db")
+
+    def test_inference_creates_a_persisted_event(self, client):
+        before = client.get("/detections").get_json()["total_stored"]
+        img = _a_real_test_image()
+        with img.open("rb") as fh:
+            client.post("/api/detect", data={"image": (fh, img.name)},
+                        content_type="multipart/form-data")
+        after = client.get("/detections").get_json()["total_stored"]
+        assert after >= before, "inference should not lose events"
+
+    def test_statistics_includes_history_totals(self, client):
+        h = client.get("/statistics").get_json()["history"]
+        for key in ("total_events", "total_objects", "storage", "max_events"):
+            assert key in h
+
+    def test_frontend_submission_returns_an_event_id(self, client):
+        r = client.post("/api/detections", json={
+            "location": {"lat": 5.6, "lng": -0.19},
+            "detections": [{"type": "Vehicle", "confidence": 0.9}],
+        })
+        assert r.status_code == 201
+        assert r.get_json()["event_id"] is not None

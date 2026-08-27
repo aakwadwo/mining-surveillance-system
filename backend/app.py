@@ -44,7 +44,6 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -61,6 +60,7 @@ from flask_cors import CORS  # noqa: E402
 import config  # noqa: E402
 import taxonomy  # noqa: E402
 from detector import Detector  # noqa: E402
+from history import DetectionHistory  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,10 +82,9 @@ if _config_problems:
 
 detector = Detector()
 
-# Recent detections, newest last. A bounded deque so a long-running
-# server cannot exhaust memory.
-detection_history: deque[dict[str, Any]] = deque(maxlen=config.DETECTION_HISTORY_LIMIT)
-_history_lock = threading.Lock()
+# Detection events, persisted to SQLite so they survive a restart.
+# See backend/history.py for why SQLite and why events (not frames).
+detection_history = DetectionHistory(config.HISTORY_DB, config.HISTORY_MAX_EVENTS)
 
 
 # ---------------------------------------------------------------
@@ -177,15 +176,21 @@ CORS(app, origins=config.CORS_ORIGINS)
 
 
 def record_detection_event(detections: list[dict[str, Any]],
-                           meta: dict[str, Any] | None = None) -> None:
-    entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "synthetic": detector.mode != "model",
-        "detections": detections,
-        "metadata": meta or {},
-    }
-    with _history_lock:
-        detection_history.append(entry)
+                           meta: dict[str, Any] | None = None,
+                           *, force: bool = False) -> int | None:
+    """
+    Persist one detection event.
+
+    Returns the stored row id, or None when the store deliberately
+    skipped it (an empty frame, or a duplicate of the previous result
+    inside the de-duplication window). See backend/history.py.
+    """
+    return detection_history.record(
+        detections,
+        meta or {},
+        synthetic=detector.mode != "model",
+        force=force,
+    )
 
 
 # ---------------------------------------------------------------
@@ -204,7 +209,7 @@ def index():
             "endpoints": {
                 "GET /health": "server, model and camera status",
                 "GET /statistics": "detection counts for this session",
-                "GET /detections": "recent detection history",
+                "GET /detections": "persisted detection history (survives restart)",
                 "POST /api/detections": "submit a detection record",
                 "GET /client-config": "browser-safe config (Maps key)",
                 "GET /config": "current configuration",
@@ -258,14 +263,17 @@ def health():
             },
         },
         "config_problems": _config_problems,
-        "history_size": len(detection_history),
+        "history_size": detection_history.count(),
     }
     return jsonify(body), (200 if healthy else 503)
 
 
 @app.get("/statistics")
 def statistics():
-    return jsonify(detector.statistics())
+    """Session counters from the detector, plus persisted history totals."""
+    body = detector.statistics()
+    body["history"] = detection_history.summary()
+    return jsonify(body)
 
 
 @app.get("/detections")
@@ -280,12 +288,14 @@ def get_detections():
     except ValueError:
         return jsonify({"error": "limit must be an integer"}), 400
 
-    with _history_lock:
-        items = list(detection_history)[-max(limit, 0):]
+    items = detection_history.recent(limit)
 
     return jsonify(
         {
             "count": len(items),
+            "total_stored": detection_history.count(),
+            "persistent": True,
+            "storage": str(config.HISTORY_DB),
             "synthetic": detector.mode != "model",
             "warning": None if detector.mode == "model" else
                        "History may contain synthetic (mock) detections; check each entry.",
@@ -316,15 +326,19 @@ def post_detections():
     if location and not all(isinstance(location.get(k), (int, float)) for k in ("lat", "lng")):
         return jsonify({"success": False, "error": "location.lat and location.lng must be numbers"}), 400
 
-    record_detection_event(detections, {"location": location, "source": "frontend",
-                         **(payload.get("metadata") or {})})
+    event_id = record_detection_event(
+        detections,
+        {"location": location, "source": "frontend", **(payload.get("metadata") or {})},
+        force=True,   # an explicit submission is an event even if empty
+    )
 
     return jsonify(
         {
             "success": True,
             "message": "detection recorded",
+            "event_id": event_id,
             "received": len(detections),
-            "history_size": len(detection_history),
+            "history_size": detection_history.count(),
         }
     ), 201
 

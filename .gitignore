@@ -84,3 +84,6 @@ yolov12*.pt
 
 # Temporary verification sample images (never committed)
 frontend/devsample/
+
+# Runtime detection history database (regenerated; not source)
+backend/data/*.db
