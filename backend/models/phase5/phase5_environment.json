@@ -1,0 +1,30 @@
+{
+  "timestamp": "2026-08-27T19:52:54.187735+00:00",
+  "python": "3.12.11",
+  "platform": "Darwin 25.6.0 arm64",
+  "torch": "2.13.0",
+  "ultralytics": "8.3.253",
+  "ultralytics_path": "/Users/kwadwo/Downloads/final year ai/.venv/lib/python3.12/site-packages/ultralytics",
+  "device": "mps",
+  "base_model": "yolo12n.pt",
+  "architecture": "YOLOv12-nano",
+  "data": "/Users/kwadwo/Downloads/final year ai/dataset-phase5/data.yaml",
+  "epochs": 100,
+  "batch": 16,
+  "imgsz": 640,
+  "seed": 0,
+  "optimizer": "auto",
+  "lr0": 0.01,
+  "patience": 100,
+  "classes": [
+    "ExcavationMachinery",
+    "MiningTool",
+    "Person",
+    "ProcessingEquipment",
+    "Structure",
+    "Vehicle"
+  ],
+  "duration_seconds": 1996.5,
+  "duration_human": "0.55 h",
+  "output_dir": "/Users/kwadwo/Downloads/final year ai/runs/phase5/yolo12n-phase5"
+}

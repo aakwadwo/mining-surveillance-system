@@ -1,0 +1,154 @@
+{
+  "Run 6 baseline": {
+    "model": "/Users/kwadwo/Downloads/final year ai/backend/models/galamsey-run6-baseline.pt",
+    "model_names": {
+      "0": "ExcavationMachinery",
+      "1": "MiningTool",
+      "2": "Person",
+      "3": "ProcessingEquiment",
+      "4": "Structure",
+      "5": "Vehicle"
+    },
+    "num_classes": 6,
+    "data": "/Users/kwadwo/Downloads/final year ai/dataset-phase5/data.yaml",
+    "split": "val",
+    "implementation": "vendored",
+    "ultralytics": "8.3.63",
+    "ultralytics_path": "/Users/kwadwo/Downloads/final year ai/yolov12/ultralytics",
+    "device": "mps",
+    "conf": 0.001,
+    "iou": 0.6,
+    "overall": {
+      "precision": 0.432,
+      "recall": 0.2622,
+      "mAP50": 0.2226,
+      "mAP50-95": 0.0857
+    },
+    "per_class": {
+      "ExcavationMachinery": {
+        "class_id": 0,
+        "precision": 0.3081,
+        "recall": 0.4675,
+        "mAP50": 0.2487,
+        "mAP50-95": 0.092
+      },
+      "MiningTool": {
+        "class_id": 1,
+        "precision": 0.374,
+        "recall": 0.2892,
+        "mAP50": 0.2095,
+        "mAP50-95": 0.0989
+      },
+      "Person": {
+        "class_id": 2,
+        "precision": 0.4326,
+        "recall": 0.4957,
+        "mAP50": 0.4482,
+        "mAP50-95": 0.1675
+      },
+      "ProcessingEquiment": {
+        "class_id": 3,
+        "precision": 0.3264,
+        "recall": 0.1961,
+        "mAP50": 0.1972,
+        "mAP50-95": 0.056
+      },
+      "Structure": {
+        "class_id": 4,
+        "precision": 0.1506,
+        "recall": 0.125,
+        "mAP50": 0.0218,
+        "mAP50-95": 0.0067
+      },
+      "Vehicle": {
+        "class_id": 5,
+        "precision": 1.0,
+        "recall": 0.0,
+        "mAP50": 0.2103,
+        "mAP50-95": 0.0932
+      }
+    },
+    "speed_ms": {
+      "preprocess": 0.42,
+      "inference": 10.86,
+      "loss": 0.0,
+      "postprocess": 2.96
+    }
+  },
+  "Phase 5": {
+    "model": "/Users/kwadwo/Downloads/final year ai/runs/phase5/yolo12n-phase5/weights/best.pt",
+    "model_names": {
+      "0": "ExcavationMachinery",
+      "1": "MiningTool",
+      "2": "Person",
+      "3": "ProcessingEquipment",
+      "4": "Structure",
+      "5": "Vehicle"
+    },
+    "num_classes": 6,
+    "data": "/Users/kwadwo/Downloads/final year ai/dataset-phase5/data.yaml",
+    "split": "val",
+    "implementation": "pip",
+    "ultralytics": "8.3.253",
+    "ultralytics_path": "/Users/kwadwo/Downloads/final year ai/.venv/lib/python3.12/site-packages/ultralytics",
+    "device": "mps",
+    "conf": 0.001,
+    "iou": 0.6,
+    "overall": {
+      "precision": 0.7498,
+      "recall": 0.3696,
+      "mAP50": 0.4361,
+      "mAP50-95": 0.2308
+    },
+    "per_class": {
+      "ExcavationMachinery": {
+        "class_id": 0,
+        "precision": 0.7173,
+        "recall": 0.6494,
+        "mAP50": 0.721,
+        "mAP50-95": 0.4642
+      },
+      "MiningTool": {
+        "class_id": 1,
+        "precision": 0.5253,
+        "recall": 0.2169,
+        "mAP50": 0.2714,
+        "mAP50-95": 0.1428
+      },
+      "Person": {
+        "class_id": 2,
+        "precision": 0.5954,
+        "recall": 0.6336,
+        "mAP50": 0.6135,
+        "mAP50-95": 0.2734
+      },
+      "ProcessingEquipment": {
+        "class_id": 3,
+        "precision": 0.6607,
+        "recall": 0.2745,
+        "mAP50": 0.3819,
+        "mAP50-95": 0.1896
+      },
+      "Structure": {
+        "class_id": 4,
+        "precision": 1.0,
+        "recall": 0.0,
+        "mAP50": 0.0128,
+        "mAP50-95": 0.0038
+      },
+      "Vehicle": {
+        "class_id": 5,
+        "precision": 1.0,
+        "recall": 0.4432,
+        "mAP50": 0.6163,
+        "mAP50-95": 0.3109
+      }
+    },
+    "speed_ms": {
+      "preprocess": 0.36,
+      "inference": 6.02,
+      "loss": 0.0,
+      "postprocess": 2.75
+    }
+  }
+}

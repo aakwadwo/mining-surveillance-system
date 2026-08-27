@@ -396,3 +396,114 @@ class TestFrontend:
 
     def test_footer_credits_the_right_model(self):
         assert "YOLOv8" not in (FRONTEND / "index.html").read_text()
+
+
+# ===============================================================
+# G. Phase 5 — recovered dataset and retrained model
+# ===============================================================
+PHASE5_DATASET = PROJECT_ROOT / "dataset-phase5"
+PHASE5_MODEL = PROJECT_ROOT / "backend" / "models" / "galamsey-phase5.pt"
+
+
+class TestPhase5Dataset:
+    def test_dataset_exists(self):
+        assert PHASE5_DATASET.is_dir(), "run tools/recover_dataset.py"
+        assert (PHASE5_DATASET / "data.yaml").exists()
+        assert (PHASE5_DATASET / "MANIFEST.json").exists()
+
+    def test_validator_passes(self):
+        result = subprocess.run(
+            [sys.executable, str(PROJECT_ROOT / "tools" / "validate_dataset.py"),
+             str(PHASE5_DATASET)],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout[-3000:]
+        assert "RESULT: PASSED" in result.stdout
+
+    def test_data_yaml_matches_taxonomy(self):
+        import yaml
+
+        cfg = yaml.safe_load((PHASE5_DATASET / "data.yaml").read_text())
+        assert cfg["nc"] == taxonomy.NUM_CLASSES
+        assert list(cfg["names"]) == list(taxonomy.DATASET_NAMES)
+
+    def test_no_cross_split_leakage(self):
+        """
+        The single most damaging dataset bug. Verified here by the phash
+        recorded in the manifest, independently of the build script.
+        """
+        manifest = json.loads((PHASE5_DATASET / "MANIFEST.json").read_text())
+        split_of: dict[str, str] = {}
+        leaks = []
+        for entry in manifest["files"]:
+            h = entry["phash"]
+            if h in split_of and split_of[h] != entry["split"]:
+                leaks.append(f"{entry['output_name']}: {split_of[h]} and {entry['split']}")
+            split_of[h] = entry["split"]
+        assert not leaks, f"cross-split leakage: {leaks[:5]}"
+
+    def test_every_photograph_is_unique(self):
+        manifest = json.loads((PHASE5_DATASET / "MANIFEST.json").read_text())
+        hashes = [e["phash"] for e in manifest["files"]]
+        assert len(hashes) == len(set(hashes)), "duplicate photographs in the dataset"
+
+    def test_manifest_records_provenance(self):
+        manifest = json.loads((PHASE5_DATASET / "MANIFEST.json").read_text())
+        origins = {e["origin"] for e in manifest["files"]}
+        assert origins == {"dataset-a", "galamsey-ev0ma-v2"}
+        assert manifest["class_map_source_to_target"] == {
+            "0": 2, "1": 3, "2": 0, "3": 3, "4": 5, "5": 3, "6": 3
+        }
+
+    def test_dataset_a_still_intact(self):
+        """Phase 5 must not have modified the authoritative baseline."""
+        a = PROJECT_ROOT / "illegal mining activities"
+        counts = {s: len([p for p in (a / s / "images").iterdir()
+                          if not p.name.startswith(".")]) for s in ("train", "valid", "test")}
+        assert counts == {"train": 61, "valid": 17, "test": 9}
+
+    def test_all_labels_are_boxes_not_polygons(self):
+        """Source annotations were polygons; conversion must be complete."""
+        for split in ("train", "valid", "test"):
+            for lbl in (PHASE5_DATASET / split / "labels").iterdir():
+                if lbl.suffix != ".txt":
+                    continue
+                for i, line in enumerate(lbl.read_text().splitlines(), 1):
+                    if line.strip():
+                        assert len(line.split()) == 5, f"{lbl.name}:{i} is not a 5-field box"
+
+
+@pytest.mark.skipif(not PHASE5_MODEL.exists(), reason="Phase 5 model not yet trained")
+class TestPhase5Model:
+    def test_loads_without_the_vendored_fork(self):
+        """
+        The whole point of retraining with pip Ultralytics: the new weights
+        must run under the maintained package, with no sys.path tricks.
+        """
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import sys, os;"
+             "from ultralytics import YOLO;"
+             "import ultralytics;"
+             "assert 'yolov12' not in os.path.dirname(ultralytics.__file__);"
+             f"m = YOLO(r'{PHASE5_MODEL}');"
+             "import numpy as np;"
+             "r = m.predict(np.zeros((64,64,3), dtype='uint8'), verbose=False);"
+             "print('OK', len(m.names))"],
+            capture_output=True, text=True, cwd=PROJECT_ROOT,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+        assert "OK 6" in result.stdout
+
+    def test_embedded_names_match_taxonomy_exactly(self):
+        """No legacy alias needed - the new model uses the corrected spelling."""
+        result = subprocess.run(
+            [sys.executable, "-c",
+             f"from ultralytics import YOLO; import json;"
+             f"print(json.dumps(dict(YOLO(r'{PHASE5_MODEL}').names)))"],
+            capture_output=True, text=True, cwd=PROJECT_ROOT,
+        )
+        assert result.returncode == 0, result.stderr[-2000:]
+        names = {int(k): v for k, v in json.loads(result.stdout.strip().splitlines()[-1]).items()}
+        assert names == dict(enumerate(taxonomy.DATASET_NAMES))
+        assert taxonomy.verify_against_model(names) == []

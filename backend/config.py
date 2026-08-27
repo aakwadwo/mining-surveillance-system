@@ -67,8 +67,18 @@ MODELS_DIR: Path = BACKEND_DIR / "models"
 DATA_DIR: Path = BACKEND_DIR / "data"               # detection history
 LOGS_DIR: Path = BACKEND_DIR / "logs"
 
-# The baseline weights. See backend/models/PROVENANCE.md.
-DEFAULT_MODEL_PATH: Path = MODELS_DIR / "galamsey-run6-baseline.pt"
+# The production model. See backend/models/PROVENANCE.md.
+#
+# Phase 5: trained with pip Ultralytics on dataset-phase5 (536
+# photographs). Test-split mAP50 0.503 vs the Run 6 baseline's 0.200.
+# Because it was built by the pip package rather than the vendored fork,
+# it needs no sys.path tricks - hence YOLO_IMPLEMENTATION defaults to
+# "pip" below.
+#
+# To run the historical baseline instead:
+#   GALAMSEY_MODEL=backend/models/galamsey-run6-baseline.pt \
+#   GALAMSEY_YOLO_IMPL=vendored ./.venv/bin/python backend/app.py
+DEFAULT_MODEL_PATH: Path = MODELS_DIR / "galamsey-phase5.pt"
 MODEL_PATH: Path = Path(os.getenv("GALAMSEY_MODEL", DEFAULT_MODEL_PATH))
 
 
@@ -85,11 +95,14 @@ DETECTION_MODE: str = os.getenv("GALAMSEY_DETECTION_MODE", "auto").lower()
 VALID_DETECTION_MODES = ("model", "mock", "auto")
 
 # Which Ultralytics implementation to use.
+#   "pip"      : the installed ultralytics package. DEFAULT since Phase 5.
 #   "vendored" : yolov12/ in this repo (Ultralytics 8.3.63 fork).
-#                REQUIRED for the current baseline weights.
-#   "pip"      : the installed ultralytics package. For Phase 5 onward.
-# See PROVENANCE.md -> "Running these weights: an important constraint".
-YOLO_IMPLEMENTATION: str = os.getenv("GALAMSEY_YOLO_IMPL", "vendored").lower()
+#                Required ONLY for the historical Run 6 / Run 8 weights,
+#                whose AAttn block uses split qk/v projections instead of
+#                upstream's fused qkv.
+# The Phase 5 model was trained with the pip package precisely to remove
+# this constraint. See PROVENANCE.md.
+YOLO_IMPLEMENTATION: str = os.getenv("GALAMSEY_YOLO_IMPL", "pip").lower()
 
 
 # ---------------------------------------------------------------
