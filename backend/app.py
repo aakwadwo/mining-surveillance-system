@@ -176,7 +176,8 @@ app = Flask(__name__)
 CORS(app, origins=config.CORS_ORIGINS)
 
 
-def _record(detections: list[dict[str, Any]], meta: dict[str, Any] | None = None) -> None:
+def record_detection_event(detections: list[dict[str, Any]],
+                           meta: dict[str, Any] | None = None) -> None:
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "synthetic": detector.mode != "model",
@@ -209,7 +210,8 @@ def index():
                 "GET /config": "current configuration",
                 "POST /config": "update the confidence threshold",
                 "GET /video_feed": "MJPEG stream with detections (needs a camera)",
-                "POST /detect": "run detection on one uploaded image",
+                "POST /api/detect": "run the model on one image - THE inference endpoint",
+                "POST /detect": "deprecated alias of /api/detect (Phase 4 shape)",
             },
         }
     )
@@ -314,7 +316,7 @@ def post_detections():
     if location and not all(isinstance(location.get(k), (int, float)) for k in ("lat", "lng")):
         return jsonify({"success": False, "error": "location.lat and location.lng must be numbers"}), 400
 
-    _record(detections, {"location": location, "source": "frontend",
+    record_detection_event(detections, {"location": location, "source": "frontend",
                          **(payload.get("metadata") or {})})
 
     return jsonify(
@@ -327,45 +329,189 @@ def post_detections():
     ), 201
 
 
+# ---------------------------------------------------------------
+# Image inference
+# ---------------------------------------------------------------
+class ImageRequestError(Exception):
+    """The client's request was malformed. Carries the HTTP status."""
+
+    def __init__(self, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+def _decode_uploaded_image() -> tuple[np.ndarray, str | None]:
+    """
+    Pull an image out of the request and decode it.
+
+    Accepts, in order of preference:
+      * multipart form field named "image" (what the dashboard sends)
+      * multipart form field named "file"  (common alternative)
+      * a raw image body with an image/* Content-Type
+
+    Raises ImageRequestError with a precise message rather than letting
+    an exception escape - an endpoint that 500s on a bad upload is
+    indistinguishable from one that 500s because the model broke, and
+    that ambiguity wastes hours when something actually goes wrong.
+    """
+    upload = request.files.get("image") or request.files.get("file")
+
+    if upload is not None:
+        payload = upload.read()
+        filename = upload.filename
+    elif request.mimetype and request.mimetype.startswith("image/"):
+        payload = request.get_data()
+        filename = None
+    else:
+        raise ImageRequestError(
+            "no image supplied: send multipart/form-data with a field named "
+            "'image', or POST raw bytes with an image/* Content-Type"
+        )
+
+    if not payload:
+        raise ImageRequestError("empty image upload")
+
+    frame = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise ImageRequestError(
+            "could not decode image: the bytes are not a readable image format"
+        )
+    return frame, filename
+
+
+def _run_inference(frame: np.ndarray, meta: dict[str, Any]) -> dict[str, Any]:
+    """Run the detector on one frame and record the event."""
+    if detector.mode == "unavailable":
+        raise ImageRequestError(
+            f"model unavailable: {detector.model_error}", status=503
+        )
+
+    detections = [d.to_dict() for d in detector.detect(frame)]
+    height, width = frame.shape[:2]
+    inference_ms = detector.last_inference_ms
+
+    record_detection_event(
+        detections,
+        {
+            **meta,
+            "image_width": int(width),
+            "image_height": int(height),
+            "inference_time_ms": inference_ms,
+        },
+    )
+
+    return {
+        "detections": detections,
+        "image_width": int(width),
+        "image_height": int(height),
+        "inference_time_ms": (round(inference_ms, 2) if inference_ms is not None else None),
+    }
+
+
+@app.post("/api/detect")
+def api_detect():
+    """
+    Run the real model on one uploaded image or camera frame.
+
+    This is THE inference endpoint the dashboard uses. Every bounding box
+    the user sees originates from a response to this route.
+
+        curl -F image=@photo.jpg http://127.0.0.1:5004/api/detect
+
+    Response (200):
+        {
+          "success": true,
+          "detections": [
+            {"class_id": 2, "class_name": "Person", "confidence": 0.9527,
+             "bbox": {"x1": 104, "y1": 132, "x2": 146, "y2": 243}}
+          ],
+          "image_width": 639,
+          "image_height": 426,
+          "inference_time_ms": 108.0
+        }
+
+    bbox coordinates are PIXELS IN THE SUBMITTED IMAGE. The client is
+    responsible for scaling them to whatever size it displays the image
+    at - which is why image_width/image_height are returned alongside.
+
+    Errors return {"success": false, "error": "..."} with
+        400  the request or the image was malformed
+        503  the model is not loaded
+        500  anything unexpected
+    """
+    try:
+        frame, filename = _decode_uploaded_image()
+        result = _run_inference(frame, {"source": "api", "filename": filename})
+    except ImageRequestError as exc:
+        return jsonify({"success": False, "error": exc.message}), exc.status
+    except Exception as exc:  # noqa: BLE001 - never leak a stack trace to a client
+        logger.exception("inference failed")
+        return jsonify({
+            "success": False,
+            "error": f"inference failed: {type(exc).__name__}",
+        }), 500
+
+    detections = [
+        {
+            "class_id": d["class_id"],
+            "class_name": d["class_name"],
+            "confidence": d["confidence"],
+            "bbox": {
+                "x1": d["bbox"][0], "y1": d["bbox"][1],
+                "x2": d["bbox"][2], "y2": d["bbox"][3],
+            },
+        }
+        for d in result["detections"]
+    ]
+
+    body = {
+        "success": True,
+        "detections": detections,
+        "image_width": result["image_width"],
+        "image_height": result["image_height"],
+        "inference_time_ms": result["inference_time_ms"],
+    }
+    # Honesty flags. In the default configuration these are always
+    # false/None; they exist so a client can NEVER be fooled by mock mode.
+    if detector.mode != "model":
+        body["synthetic"] = True
+        body["warning"] = ("SYNTHETIC placeholder data - the real model is not "
+                           "running. Do not present these as results.")
+    else:
+        body["synthetic"] = False
+    return jsonify(body)
+
+
 @app.post("/detect")
 def detect_image():
     """
-    Run the detector on a single uploaded image.
+    DEPRECATED alias of POST /api/detect, kept for backwards
+    compatibility with anything written against the Phase 4 shape
+    (bbox as a bare [x1,y1,x2,y2] array, dimensions under "image").
 
-    Why this endpoint exists: without it, the ONLY way to exercise the
-    model is the webcam, so the detection pipeline cannot be tested on a
-    machine with no camera, in CI, or from a script. It is also the
-    simplest way to demonstrate the system in a viva.
-
-        curl -F image=@photo.jpg http://127.0.0.1:5004/detect
+    Same model, same code path - only the JSON shape differs. New
+    clients should use /api/detect.
     """
-    if "image" not in request.files:
-        return jsonify({"error": "no file part named 'image'"}), 400
+    try:
+        frame, filename = _decode_uploaded_image()
+        result = _run_inference(frame, {"source": "upload", "filename": filename})
+    except ImageRequestError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("inference failed")
+        return jsonify({"error": f"inference failed: {type(exc).__name__}"}), 500
 
-    upload = request.files["image"]
-    raw = np.frombuffer(upload.read(), dtype=np.uint8)
-    if raw.size == 0:
-        return jsonify({"error": "empty upload"}), 400
-
-    frame = cv2.imdecode(raw, cv2.IMREAD_COLOR)
-    if frame is None:
-        return jsonify({"error": "could not decode image"}), 400
-
-    results = [d.to_dict() for d in detector.detect(frame)]
-    _record(results, {"source": "upload", "filename": upload.filename})
-
-    return jsonify(
-        {
-            "synthetic": detector.mode != "model",
-            "warning": None if detector.mode == "model" else
-                       "SYNTHETIC placeholder data - the model is not running",
-            "mode": detector.mode,
-            "image": {"width": int(frame.shape[1]), "height": int(frame.shape[0])},
-            "inference_ms": detector.last_inference_ms,
-            "count": len(results),
-            "detections": results,
-        }
-    )
+    return jsonify({
+        "synthetic": detector.mode != "model",
+        "warning": None if detector.mode == "model" else
+                   "SYNTHETIC placeholder data - the model is not running",
+        "mode": detector.mode,
+        "image": {"width": result["image_width"], "height": result["image_height"]},
+        "inference_ms": result["inference_time_ms"],
+        "count": len(result["detections"]),
+        "detections": result["detections"],
+    })
 
 
 @app.route("/config", methods=["GET", "POST"])
