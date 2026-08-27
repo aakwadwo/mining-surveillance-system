@@ -1,56 +1,16 @@
-# Galamsey AI Detector Backend Dependencies
-# ===========================================
-# Core dependencies for illegal mining detection using YOLOv12
-
-# Web Framework
-Flask==2.3.3
-Flask-CORS==4.0.0
-
-# Computer Vision and AI
-torch>=1.12.0
-torchvision>=0.13.0
-ultralytics>=8.0.0
-opencv-python==4.8.1.78
-numpy>=1.21.0
-Pillow>=9.0.0
-
-# YOLOv12 and related models
-# Note: YOLOv12 may require specific versions - adjust as needed
-# ultralytics includes YOLOv8, YOLOv9, YOLOv10, YOLOv11
-# For YOLOv12, you may need to install from specific repository
-
-# Image processing and utilities
-scikit-image>=0.19.0
-matplotlib>=3.5.0
-seaborn>=0.11.0
-
-# Data handling
-pandas>=1.4.0
-json5>=0.9.0
-
-# System and logging
-psutil>=5.9.0
-python-dateutil>=2.8.0
-
-# Optional: GPU acceleration (uncomment if using CUDA)
-# torch-audio>=0.12.0
-# torchaudio>=0.12.0
-
-# Development and testing (optional)
-pytest>=7.0.0
-pytest-flask>=1.2.0
-black>=22.0.0
-flake8>=5.0.0
-
-# Raspberry Pi specific dependencies (uncomment for Pi deployment)
-# RPi.GPIO>=0.7.1
-# picamera>=1.13.0
-# gpiozero>=1.6.0
-
-# Additional utilities for production
-gunicorn>=20.1.0
-python-dotenv>=0.19.0
-requests>=2.28.0
-
-
-
+# MOVED
+# ============================================================
+# Backend dependencies are now declared at the PROJECT ROOT so that
+# one virtual environment serves the backend, the dataset tools and
+# (from Phase 5) training:
+#
+#     ../requirements.txt        runtime
+#     ../requirements-dev.txt    runtime + test tooling
+#
+# Install:
+#     cd ..
+#     python3 -m venv .venv
+#     ./.venv/bin/python -m pip install -r requirements.txt
+#
+# This file is kept as a signpost so anyone following the old
+# backend/README.md instructions is not left guessing.

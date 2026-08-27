@@ -1,74 +1,192 @@
-# Galamsey AI Detector Backend Configuration
-# ==========================================
-# Configuration file for different deployment environments
+"""
+Galamsey AI Detector — configuration
+====================================
+
+THE SINGLE SOURCE OF TRUTH FOR PATHS, PORTS AND MODES.
+
+Nothing else may hardcode a path, a port, or a detection mode.
+
+------------------------------------------------------------------
+WHY EVERY PATH IS ANCHORED TO __file__
+------------------------------------------------------------------
+The inherited code used relative paths:
+
+    model_path   = "yolov12"
+    dataset_path = "illegal mining activities"
+
+A relative path is resolved against the CURRENT WORKING DIRECTORY —
+whatever folder your shell happened to be in. Run `python app.py` from
+backend/ and "yolov12" means "backend/yolov12", which does not exist.
+The model was therefore never found, and the server silently fell back
+to fake detections. Nothing errored; it just quietly did the wrong thing.
+
+    Path("yolov12")                  -> depends on the shell. Unpredictable.
+    Path(__file__).resolve().parent  -> depends on the FILE. Deterministic.
+
+__file__ is the location of this source file. Anchoring to it means the
+server behaves identically whether it is started from the project root,
+from backend/, from an IDE, or by a service manager.
+
+------------------------------------------------------------------
+OVERRIDING
+------------------------------------------------------------------
+Every value below can be overridden with an environment variable, so
+deployment never requires editing source:
+
+    GALAMSEY_PORT=5005 ./.venv/bin/python backend/app.py
+    GALAMSEY_DETECTION_MODE=mock ./.venv/bin/python backend/app.py
+"""
+
+from __future__ import annotations
 
 import os
 from pathlib import Path
 
-class Config:
-    """Base configuration class"""
-    
-    # Model Configuration
-    MODEL_PATH = "yolov12"
-    DATASET_PATH = "illegal mining activities"
-    DETECTION_THRESHOLD = 0.5
-    CONFIDENCE_THRESHOLD = 0.3
-    
-    # Camera Configuration
-    CAMERA_INDEX = 0  # Default camera index
-    CAMERA_WIDTH = 640
-    CAMERA_HEIGHT = 480
-    CAMERA_FPS = 30
-    
-    # Server Configuration
-    HOST = "0.0.0.0"
-    PORT = 5000
-    DEBUG = True
-    
-    # Detection Classes
-    ILLEGAL_CLASSES = [
-        'excavator', 'bulldozer', 'water_pump', 'wash_plant',
-        'truck', 'conveyor', 'drill', 'mining_equipment',
-        'illegal_site', 'suspicious_activity'
-    ]
-    
-    LEGAL_CLASSES = [
-        'legal_site', 'authorized_equipment', 'permitted_operation'
-    ]
+# ---------------------------------------------------------------
+# Paths — all derived from this file's own location
+# ---------------------------------------------------------------
+BACKEND_DIR: Path = Path(__file__).resolve().parent
+PROJECT_ROOT: Path = BACKEND_DIR.parent
 
-class DevelopmentConfig(Config):
-    """Development environment configuration"""
-    DEBUG = True
-    MODEL_PATH = "yolov12"
-    CAMERA_INDEX = 0
+FRONTEND_DIR: Path = PROJECT_ROOT / "frontend"
+DATASET_DIR: Path = PROJECT_ROOT / "illegal mining activities"
+DATASET_YAML: Path = DATASET_DIR / "data.yaml"
+YOLOV12_DIR: Path = PROJECT_ROOT / "yolov12"        # vendored upstream fork
 
-class ProductionConfig(Config):
-    """Production environment configuration"""
-    DEBUG = False
-    MODEL_PATH = "/opt/galamsey/models/yolov12"
-    CAMERA_INDEX = 0  # May need adjustment for Pi camera
+MODELS_DIR: Path = BACKEND_DIR / "models"
+DATA_DIR: Path = BACKEND_DIR / "data"               # detection history
+LOGS_DIR: Path = BACKEND_DIR / "logs"
 
-class RaspberryPiConfig(Config):
-    """Raspberry Pi specific configuration"""
-    DEBUG = False
-    MODEL_PATH = "/home/pi/galamsey/models/yolov12"
-    CAMERA_INDEX = 0  # Pi camera
-    CAMERA_WIDTH = 1280
-    CAMERA_HEIGHT = 720
-    CAMERA_FPS = 15  # Lower FPS for Pi performance
-    
-    # Pi-specific optimizations
-    TORCH_THREADS = 2
-    OPENCV_THREADS = 2
+# The baseline weights. See backend/models/PROVENANCE.md.
+DEFAULT_MODEL_PATH: Path = MODELS_DIR / "galamsey-run6-baseline.pt"
+MODEL_PATH: Path = Path(os.getenv("GALAMSEY_MODEL", DEFAULT_MODEL_PATH))
 
-# Environment-based configuration
-def get_config():
-    """Get configuration based on environment"""
-    env = os.getenv('FLASK_ENV', 'development')
-    
-    if env == 'production':
-        return ProductionConfig()
-    elif env == 'raspberry_pi':
-        return RaspberryPiConfig()
-    else:
-        return DevelopmentConfig()
+
+# ---------------------------------------------------------------
+# Detection mode  —  see backend/detector.py
+# ---------------------------------------------------------------
+#   "model" : run the real neural network. Fails loudly if unavailable.
+#   "mock"  : return clearly-labelled synthetic detections for UI work.
+#   "auto"  : use "model" if the weights load, otherwise fall back to
+#             "mock" — but say so, loudly, in every response.
+#
+# Mock output is ALWAYS tagged so it can never be mistaken for real AI.
+DETECTION_MODE: str = os.getenv("GALAMSEY_DETECTION_MODE", "auto").lower()
+VALID_DETECTION_MODES = ("model", "mock", "auto")
+
+# Which Ultralytics implementation to use.
+#   "vendored" : yolov12/ in this repo (Ultralytics 8.3.63 fork).
+#                REQUIRED for the current baseline weights.
+#   "pip"      : the installed ultralytics package. For Phase 5 onward.
+# See PROVENANCE.md -> "Running these weights: an important constraint".
+YOLO_IMPLEMENTATION: str = os.getenv("GALAMSEY_YOLO_IMPL", "vendored").lower()
+
+
+# ---------------------------------------------------------------
+# Inference
+# ---------------------------------------------------------------
+CONFIDENCE_THRESHOLD: float = float(os.getenv("GALAMSEY_CONF", "0.25"))
+IOU_THRESHOLD: float = float(os.getenv("GALAMSEY_IOU", "0.45"))
+INFERENCE_IMGSZ: int = int(os.getenv("GALAMSEY_IMGSZ", "640"))
+
+# "mps" = Apple GPU, "cpu", "cuda", or "auto" to pick the best available.
+DEVICE: str = os.getenv("GALAMSEY_DEVICE", "auto").lower()
+
+
+# ---------------------------------------------------------------
+# Server
+# ---------------------------------------------------------------
+# 127.0.0.1 by default, NOT 0.0.0.0. The inherited code bound to
+# 0.0.0.0 with debug=True, which exposes the Werkzeug debugger — an
+# arbitrary-code-execution console — to every machine on the network.
+HOST: str = os.getenv("GALAMSEY_HOST", "127.0.0.1")
+
+# 5004 is the agreed development port: app.py already used it, and
+# macOS AirPlay Receiver occupies 5000.
+PORT: int = int(os.getenv("GALAMSEY_PORT", "5004"))
+
+DEBUG: bool = os.getenv("GALAMSEY_DEBUG", "0") == "1"
+
+# Origins allowed to call this API from a browser. The frontend is
+# served on 5501 (see tools/serve_frontend.sh).
+CORS_ORIGINS: list[str] = [
+    o.strip()
+    for o in os.getenv(
+        "GALAMSEY_CORS_ORIGINS",
+        "http://localhost:5501,http://127.0.0.1:5501",
+    ).split(",")
+    if o.strip()
+]
+
+
+# ---------------------------------------------------------------
+# Camera  —  optional, never a prerequisite
+# ---------------------------------------------------------------
+# The backend must start and pass health checks with no camera at all.
+CAMERA_ENABLED: bool = os.getenv("GALAMSEY_CAMERA", "1") == "1"
+CAMERA_INDEX: int = int(os.getenv("GALAMSEY_CAMERA_INDEX", "0"))
+CAMERA_WIDTH: int = int(os.getenv("GALAMSEY_CAMERA_WIDTH", "640"))
+CAMERA_HEIGHT: int = int(os.getenv("GALAMSEY_CAMERA_HEIGHT", "480"))
+CAMERA_FPS: int = int(os.getenv("GALAMSEY_CAMERA_FPS", "15"))
+
+# How many recent detections /detections keeps in memory.
+DETECTION_HISTORY_LIMIT: int = int(os.getenv("GALAMSEY_HISTORY", "100"))
+
+
+def ensure_directories() -> None:
+    """Create the runtime directories if they are missing."""
+    for d in (MODELS_DIR, DATA_DIR, LOGS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+def validate() -> list[str]:
+    """Return a list of configuration problems; empty means all good."""
+    problems: list[str] = []
+
+    if DETECTION_MODE not in VALID_DETECTION_MODES:
+        problems.append(
+            f"GALAMSEY_DETECTION_MODE={DETECTION_MODE!r} is not one of "
+            f"{VALID_DETECTION_MODES}"
+        )
+    if YOLO_IMPLEMENTATION not in ("vendored", "pip"):
+        problems.append(
+            f"GALAMSEY_YOLO_IMPL={YOLO_IMPLEMENTATION!r} must be 'vendored' or 'pip'"
+        )
+    if not 0.0 < CONFIDENCE_THRESHOLD <= 1.0:
+        problems.append(f"GALAMSEY_CONF={CONFIDENCE_THRESHOLD} must be in (0, 1]")
+    if not DATASET_YAML.exists():
+        problems.append(f"dataset yaml not found: {DATASET_YAML}")
+    if YOLO_IMPLEMENTATION == "vendored" and not (YOLOV12_DIR / "ultralytics").is_dir():
+        problems.append(f"vendored ultralytics not found in {YOLOV12_DIR}")
+
+    return problems
+
+
+def as_dict() -> dict:
+    """Serialisable snapshot, used by the /config endpoint and tests."""
+    return {
+        "project_root": str(PROJECT_ROOT),
+        "model_path": str(MODEL_PATH),
+        "model_exists": MODEL_PATH.exists(),
+        "dataset_yaml": str(DATASET_YAML),
+        "detection_mode": DETECTION_MODE,
+        "yolo_implementation": YOLO_IMPLEMENTATION,
+        "confidence_threshold": CONFIDENCE_THRESHOLD,
+        "iou_threshold": IOU_THRESHOLD,
+        "imgsz": INFERENCE_IMGSZ,
+        "device": DEVICE,
+        "host": HOST,
+        "port": PORT,
+        "debug": DEBUG,
+        "cors_origins": CORS_ORIGINS,
+        "camera_enabled": CAMERA_ENABLED,
+        "camera_index": CAMERA_INDEX,
+    }
+
+
+if __name__ == "__main__":
+    import json
+
+    print(json.dumps(as_dict(), indent=2))
+    issues = validate()
+    print("\nvalidate():", "OK" if not issues else issues)
