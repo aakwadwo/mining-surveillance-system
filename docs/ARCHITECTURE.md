@@ -26,14 +26,15 @@ The rule: **if a value appears in two files, one of them is wrong.**
 
 ## 2. Two Ultralytics implementations — the important constraint
 
-This is the least obvious thing in the project.
+This is the least obvious thing in the project. Phase 5 defused it,
+but the mechanism is still worth understanding.
 
 There are **two** copies of Ultralytics available:
 
 | | Version | Where | Used for |
 |---|---|---|---|
-| **Vendored fork** | 8.3.63 | `yolov12/ultralytics/` | **inference on the current weights** |
-| **pip package** | 8.3.253 | `.venv/lib/.../ultralytics/` | Phase 5 retraining |
+| **pip package** | 8.3.253 | `.venv/lib/.../ultralytics/` | **everything, since Phase 5** |
+| **Vendored fork** | 8.3.63 | `yolov12/ultralytics/` | ONLY the historical Run 6 / Run 8 weights |
 
 They are not interchangeable, because the YOLOv12 attention block was
 implemented differently:
@@ -69,10 +70,18 @@ local folder. The checkpoint records `8.3.63` even though the notebook
 installed a newer version. Silent shadowing like that is a classic
 "works on my machine" bug — so here the choice is explicit and reported.
 
-**Phase 5 removes this constraint:** retraining with pip Ultralytics
-produces upstream-compatible weights, after which
-`GALAMSEY_YOLO_IMPL=pip` becomes the default and `yolov12/` reverts to
-being reference source only.
+**Phase 5 removed this constraint.** `galamsey-phase5.pt` was trained
+with pip Ultralytics, so `GALAMSEY_YOLO_IMPL` now defaults to `pip` and
+the production path never touches the fork. `yolov12/` is retained
+because the two historical checkpoints still need it — and because
+deleting vendored upstream source you cannot re-derive is a bad trade.
+
+One extra wrinkle when running the fork today: Ultralytics 8.3.63
+computes average precision with `np.trapz`, which NumPy 2.0 removed.
+Inference never touches it, which is why prediction works and only
+`val()` fails. `tools/evaluate_model.py` aliases
+`np.trapz = np.trapezoid` in OUR code before importing the fork. The
+fork's source is not modified.
 
 ---
 
@@ -97,17 +106,28 @@ Defences:
    `taxonomy.py`.
 4. A test asserts `frontend/config.js` matches `backend/taxonomy.py`.
 
-### Why the typo is preserved
+### The typo, and when it was safe to fix
 
-`ProcessingEqui**ment**` is wrong, and correcting it in `data.yaml`
-would take ten seconds. We don't, because the trained weights embed the
-same misspelling. Fixing one without retraining the other silently
-desynchronises them — the exact failure mode above. The correction lives
-in `DISPLAY_NAMES`, applied at render time only.
+`ProcessingEqui**ment**` was wrong, and correcting it in `data.yaml`
+would have taken ten seconds. Phase 4 deliberately did **not**, because
+the trained weights embedded the same misspelling — fixing one without
+retraining the other silently desynchronises them, which is the exact
+failure mode above.
 
-**Storage keeps the source spelling; presentation fixes it.** That
-separation is worth internalising: it applies to any field where an
-upstream system owns the canonical value.
+Phase 5 retrains, which is precisely the moment the correction became
+safe. It was applied in ONE commit across the taxonomy module, both
+`data.yaml` files, the frontend config, the tests and the docs. Class
+IDs never moved; only the string changed.
+
+Run 6 still carries the old spelling and is retained as evidence, so
+`LEGACY_NAME_ALIASES` lets `verify_against_model()` accept it. That
+mechanism is strictly for **documented renames where the id and the
+concept are unchanged** — a test asserts it cannot hide a genuine
+mismatch (class 3 renamed to `WashPlant` is still rejected). The moment
+an alias is used to silence a real disagreement, the guard is worthless.
+
+**The general lesson:** when an upstream system owns a canonical value,
+fix it at the moment you regenerate the derived artefacts, not before.
 
 ---
 
@@ -241,30 +261,45 @@ and API restrictions and a quota cap.
 | Path | Why |
 |---|---|
 | `yolov12/` | vendored upstream fork of `sunsmarterjie/yolov12`. Editing it means you can no longer diff against upstream or take fixes. If a project-specific change is genuinely needed, wrap it in our code instead. |
-| `illegal mining activities/*/labels/` | ground truth. Changing labels invalidates every metric ever measured. |
+| `illegal mining activities/*/labels/` | ground truth for the Phase 4 baseline. Changing labels invalidates every metric ever measured. |
+| `dataset-phase5/` | GENERATED. Edit `tools/recover_dataset.py` and rebuild; hand-edits will be silently overwritten. |
+| `~/Downloads/galamsey.v2i.yolov12/` | the pristine source of the recovered 449 photographs. |
 | `backend/models/archive/` | historical evidence. |
 | `~/Downloads/yolov12/` | the only record of prior training, including a verified clean dataset backup in `illegal_mining.zip`. |
 
 ---
 
-## 11. Phase 5 — what comes next, and why in this order
+## 11. What Phase 5 did, and what Phase 6 should do
 
-1. **Recover the 403 images.** A neighbouring dataset holds 403
-   photographs absent from ours, unusable only because their class ids
-   follow a different schema. Establish the source project's true class
-   list, derive a verified remapping, convert polygon annotations to
-   boxes, de-duplicate by perceptual hash, then validate. This is a
-   *label* problem, not an *image* problem — and it is worth roughly 7×
-   the current training data.
-2. **Retrain with pip Ultralytics**, which also removes the vendored-fork
-   constraint (§2).
-3. **Fix the `ProcessingEquiment` typo** at the same time, in data and
-   weights together.
-4. **Address class imbalance** — 61.5× between `Person` and `Vehicle`.
-5. **Persist detection history** to `backend/data/`; it is in memory now.
-6. **Decide on geofence drawing** — Google removed the Drawing library,
-   so it needs a replacement or removal from the UI.
+### Done in Phase 5
 
-Order matters: retraining before recovering the data would waste the
-run, and fixing the typo before retraining would desynchronise the
-weights.
+1. **Recovered 449 photographs.** The contaminated files were traced to
+   a pristine `galamsey-ev0ma` v2 export whose own `data.yaml` declared
+   the 7-class source taxonomy — so the mapping rests on documented
+   evidence, not on guessing from a few crops. Polygons were converted
+   to boxes, duplicates removed by perceptual hash.
+2. **Retrained with pip Ultralytics**, removing the fork constraint.
+3. **Fixed the spelling** in the same change as the retrain.
+4. **Measured honestly.** Test mAP50 0.200 → 0.503, every class up; but
+   the two classes whose data did not grow (`MiningTool`, `Structure`)
+   regressed on the validation split and are noise-dominated.
+
+The controlled part matters: hyperparameters were held **identical** to
+Run 6, so the dataset was the only variable. Changing both at once would
+have made the improvement unattributable.
+
+### Phase 6, in order
+
+1. **Annotate `Structure` and `MiningTool`.** They are the only classes
+   still failing, they are the two the recovered export did not cover,
+   and the fix is data, not code. `Structure` has 10 training images.
+2. **Then** consider splitting `ProcessingEquipment` back into its four
+   source concepts (§ docs/TAXONOMY_MAPPING.md 4.1) — only once there is
+   enough data per concept to learn from.
+3. **Then** try a larger backbone (`yolo12s`). Doing this before fixing
+   the data would buy a smaller improvement for a much slower model.
+4. Persist detection history; replace or remove geofence drawing.
+
+Order still matters. Capacity cannot compensate for absent data, and
+re-splitting a class before you have data for the split just recreates
+the `Structure` problem four times over.

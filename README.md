@@ -4,11 +4,12 @@ A computer-vision system for detecting illegal small-scale gold mining
 (*galamsey*) activity in Ghana from camera or drone imagery, with a web
 dashboard that plots detections on a map against geofenced areas.
 
-> **Project status: working end-to-end pipeline, weak model.**
-> The backend, frontend, dataset and inference path all work and are
-> tested. The detection model itself is an early baseline with
-> **mAP50 ≈ 0.26** — it finds some objects and misses many. Improving it
-> is Phase 5. See [Current limitations](#current-limitations).
+> **Project status: working end-to-end pipeline, usable model.**
+> Backend, frontend, dataset and inference all work and are tested.
+> Phase 5 recovered 449 additional photographs, rebuilt the dataset, and
+> retrained: **test mAP50 improved from 0.200 to 0.503 (2.5×)**, with
+> every class improving. `Structure` remains unsolved (10 training
+> images). See [Current limitations](#current-limitations).
 
 ---
 
@@ -41,8 +42,8 @@ programs** that talk over HTTP.
    │  BROWSER — http://localhost:5501                             │
    │                                                              │
    │   frontend/index.html + styles.css + script.js               │
-   │   frontend/config.js       (committed, no secrets)           │
-   │   frontend/config.local.js (git-ignored, holds Maps key)     │
+   │   frontend/config.js       (committed, NO secrets at all)    │
+   │        Maps key fetched from the backend at /client-config   │
    │                                                              │
    │   ┌───────────┐  ┌────────────────┐  ┌───────────────────┐   │
    │   │ Video     │  │ Detection      │  │ Google Map        │   │
@@ -65,14 +66,15 @@ programs** that talk over HTTP.
    │   detector.py  model loading + inference + drawing           │
    │                        │                                     │
    │                        ▼                                     │
-   │   backend/models/galamsey-run6-baseline.pt   (6 classes)     │
+   │   backend/models/galamsey-phase5.pt   (6 classes, pip YOLO)  │
+   │   .env  ->  GOOGLE_MAPS_API_KEY (git-ignored)                │
    └───────┬──────────────────────────────────────────────────────┘
            │ imports YOLO from
            ▼
    ┌──────────────────────────┐   ┌──────────────────────────────┐
-   │ yolov12/                 │   │ illegal mining activities/   │
-   │ vendored Ultralytics     │   │ 87 images, 6 classes         │
-   │ 8.3.63 fork (YOLOv12)    │   │ train 61 / valid 17 / test 9 │
+   │ pip ultralytics 8.3.253  │   │ dataset-phase5/              │
+   │ (yolov12/ fork needed    │   │ 536 photographs, 6 classes   │
+   │  only for Run 6/8)       │   │ train 399 / valid 84 / test 53│
    └──────────────────────────┘   └──────────────────────────────┘
 ```
 
@@ -100,24 +102,37 @@ final year ai/
 │   ├── taxonomy.py              THE class definitions
 │   ├── detector.py              model loading and inference
 │   └── models/
-│       ├── galamsey-run6-baseline.pt   the baseline (6 classes)
-│       ├── PROVENANCE.md               where the weights came from
-│       └── archive/                    run 8 + training metrics
+│       ├── galamsey-phase5.pt          THE PRODUCTION MODEL
+│       ├── galamsey-run6-baseline.pt   historical Phase 4 baseline
+│       ├── PROVENANCE.md               where every model came from
+│       ├── phase5/                     training + evaluation artefacts
+│       └── archive/                    run 8 + its metrics
 │
-├── illegal mining activities/   the dataset (authoritative)
+├── dataset-phase5/              THE TRAINING DATASET (generated)
 │   ├── data.yaml
-│   └── train/ valid/ test/      each with images/ and labels/
+│   ├── MANIFEST.json            origin + phash of all 536 files
+│   └── train/ valid/ test/
+│
+├── illegal mining activities/   Dataset A - the Phase 4 baseline,
+│   ├── data.yaml                preserved unmodified; 87 photographs
+│   └── train/ valid/ test/      all of which are inside dataset-phase5
 │
 ├── yolov12/                     vendored upstream fork — DO NOT EDIT
 │
 ├── tools/
+│   ├── recover_dataset.py       rebuild dataset-phase5 from sources
+│   ├── train_phase5.py          reproducible training run
+│   ├── evaluate_model.py        metrics for one model
+│   ├── compare_models.py        Run 6 vs Phase 5, same data
 │   ├── validate_dataset.py      structural dataset checks
 │   ├── serve_frontend.sh        static server on :5501
 │   ├── run_dev.sh               start backend + frontend together
 │   ├── check_camera.py          macOS camera diagnostic
 │   └── check_imports.py         dependency diagnostic
 │
-├── tests/test_phase4.py         44 tests
+├── tests/test_phase4.py         56 tests
+├── .env                         SECRETS - git-ignored
+├── .env.example                 template for .env
 ├── requirements.txt             runtime dependencies
 ├── requirements-dev.txt         + test tooling
 └── .venv/                       git-ignored
@@ -158,8 +173,10 @@ python3 -m venv .venv
 ./.venv/bin/python -m pip install -r requirements-dev.txt
 
 # 4. Optional: Google Maps key
-cp frontend/config.local.example.js frontend/config.local.js
-#   then edit frontend/config.local.js and paste your key
+cp .env.example .env
+#   then edit .env and set GOOGLE_MAPS_API_KEY=...
+#   The backend reads it and serves it to the browser at /client-config,
+#   so no credential ever sits in a frontend file.
 ```
 
 Verify:
@@ -167,7 +184,7 @@ Verify:
 ```bash
 ./.venv/bin/python -c "import torch, cv2, ultralytics, flask; print('ok')"
 ./.venv/bin/python -c "import torch; print('MPS:', torch.backends.mps.is_available())"
-./.venv/bin/python tools/validate_dataset.py
+./.venv/bin/python tools/validate_dataset.py dataset-phase5
 ```
 
 ---
@@ -222,33 +239,68 @@ allowed". That allow-list is in `backend/config.py`.
 
 ## The dataset
 
-`illegal mining activities/` — a Roboflow export, CC BY 4.0.
+`dataset-phase5/` — **536 unique photographs, 2,722 objects.** Generated
+by `tools/recover_dataset.py` from two Roboflow sources (both CC BY 4.0),
+and fully reproducible.
 
-| Split | Images | Objects |
-|---|---|---|
-| train | 61 | 1,190 |
-| valid | 17 | 324 |
-| test | 9 | 115 |
-| **Total** | **87** | **1,629** |
+| Split | Images | from Dataset A | recovered | Objects |
+|---|---|---|---|---|
+| train | 399 | 61 | 338 | 1,983 |
+| valid | 84 | 17 | 67 | 487 |
+| test | 53 | 9 | 44 | 252 |
+| **Total** | **536** | **87** | **449** | **2,722** |
+
+### Where it came from
+
+**Dataset A** (`illegal mining activities/`, 87 photographs) is the
+Phase 4 baseline, preserved unmodified. Its valid/test photographs stay
+in valid/test so the Run 6 comparison remains fair.
+
+**The recovered 449** came from the Roboflow project
+`galamsey-zutez/galamsey-ev0ma` v2 (475 images), whose labels used a
+different 7-class taxonomy and polygon format. Establishing that
+taxonomy from documented evidence — not from guessing — and remapping it
+is written up in [`docs/TAXONOMY_MAPPING.md`](docs/TAXONOMY_MAPPING.md).
+26 of the 475 were rejected: 15 perceptual duplicates of Dataset A
+photographs, 11 duplicates within the export.
+
+**A historical dataset that was NOT used:** a 657-file folder at
+`~/Downloads/yolov12/yolov12/dataset/` mixes two incompatible class
+schemas — its class 0 is people while ours is excavators. Training on it
+would silently teach the model that excavators are people. It is left
+untouched as evidence. Its clean 182-file subset was also excluded: those
+are the *same 61 photographs* as Dataset A, exported three times each
+with augmentation, so they add file count but no information.
+
+### Leakage
+
+Every photograph is fingerprinted with a perceptual hash before
+splitting, so no image can appear in two splits. Filenames cannot be
+trusted for this: Roboflow gives the same photo a different
+`.rf.<hash>` in every export. Verified by test and by the manifest.
 
 **Six classes.** The number in the label file is what matters; the name
 is only a label humans read.
 
-| id | name in `data.yaml` | shown in the UI | share of objects |
-|---|---|---|---|
-| 0 | `ExcavationMachinery` | Excavation Machinery | 6.7 % |
-| 1 | `MiningTool` | Mining Tool | 24.0 % |
-| 2 | `Person` | Person | 60.4 % |
-| 3 | `ProcessingEquiment` ⚠️ | Processing Equipment | 5.6 % |
-| 4 | `Structure` | Structure | 2.3 % |
-| 5 | `Vehicle` | Vehicle | 1.0 % |
+| id | name | objects | images | share |
+|---|---|---|---|---|
+| 0 | `ExcavationMachinery` | 423 | 314 | 15.5 % |
+| 1 | `MiningTool` | 391 | 56 | 14.4 % |
+| 2 | `Person` | 1,435 | 143 | 52.7 % |
+| 3 | `ProcessingEquipment` | 273 | 118 | 10.0 % |
+| 4 | `Structure` | 38 | **14** | 1.4 % |
+| 5 | `Vehicle` | 162 | 125 | 6.0 % |
 
-⚠️ **`ProcessingEquiment` is misspelled in the source data** (missing
-`p`). We deliberately do **not** fix it in `data.yaml`, because the same
-spelling is baked into the trained weights — changing one without
-retraining the other would desynchronise them. It is corrected for
-display only, in `backend/taxonomy.py`. Fix it at source at the next
-retrain.
+Object-count imbalance improved from 61.5× (Dataset A) to 37.8×.
+`Vehicle` grew 10.1×; `MiningTool` and `Structure` did not grow at all,
+because the recovered export does not annotate them. **`Structure` has
+only 10 training images** and is the dataset's real weak point.
+
+The upstream typo `ProcessingEqui**ment**` was corrected to
+`ProcessingEqui**p**ment` in Phase 5, synchronously across the taxonomy
+module, both `data.yaml` files, the frontend config, the tests and the
+docs. The Run 6 weights still carry the old spelling and are accepted
+via a single documented alias in `backend/taxonomy.py`.
 
 ### YOLO label format
 
@@ -282,24 +334,50 @@ meaningless, and filenames won't reveal it).
 
 ## The AI model
 
-**YOLOv12-nano**, fine-tuned from COCO-pretrained `yolov12n.pt`.
-2,520,834 parameters. Full history in
+**YOLOv12-nano**, fine-tuned from COCO-pretrained `yolo12n.pt`.
+2,557,898 parameters, trained with **pip Ultralytics 8.3.253** so it
+needs no vendored fork. Full history in
 [`backend/models/PROVENANCE.md`](backend/models/PROVENANCE.md).
 
-| | `galamsey-run6-baseline.pt` |
+| | `galamsey-phase5.pt` (production) |
 |---|---|
-| Classes | 6, matching `taxonomy.py` exactly |
-| Trained | 100 epochs, batch 16, imgsz 640, 2.3 h |
-| Precision / Recall | 0.506 / 0.255 |
-| mAP50 / mAP50-95 | **0.255** / 0.118 |
-| Reproducible | yes |
+| Classes | 6, exact match to `taxonomy.py` |
+| Trained | 100 epochs, batch 16, imgsz 640, seed 0, 0.55 h on MPS |
+| Dataset | `dataset-phase5` — 536 photographs |
+| Reproducible | yes — `tools/train_phase5.py` |
 
-**Per-class recall:** ExcavationMachinery 0.08, MiningTool 0.39,
-Person 0.48, ProcessingEquiment 0.22, Structure 0.00, Vehicle 0.00.
+### Measured on the held-out test split
 
-**Be honest about this in your write-up.** The model misses 51–100 % of
-objects depending on class and never detects `Structure` or `Vehicle`.
-It proves the pipeline works; it is not a deployable detector.
+Both models evaluated on the **same** data with the same settings:
+
+| Metric | Run 6 (Phase 4) | **Phase 5** | change |
+|---|---|---|---|
+| Precision | 0.357 | **0.492** | +0.134 |
+| Recall | 0.268 | **0.558** | +0.290 |
+| mAP50 | 0.200 | **0.503** | **2.5×** |
+| mAP50-95 | 0.079 | **0.260** | 3.3× |
+
+Per-class recall — every class improved:
+
+| Class | Run 6 | Phase 5 | data growth |
+|---|---|---|---|
+| ExcavationMachinery | 0.595 | 0.730 | 3.9× |
+| MiningTool | 0.182 | 0.273 | none |
+| Person | 0.616 | 0.812 | 1.5× |
+| ProcessingEquipment | 0.147 | 0.500 | 3.0× |
+| Structure | 0.070 | 0.333 | none |
+| Vehicle | **0.000** | **0.703** | 10.1× |
+
+**Be honest about the caveats in your write-up.** On the *validation*
+split, `MiningTool` (−0.07) and `Structure` (−0.13) went the other way.
+Those are precisely the two classes whose data did not grow, and their
+support is tiny — `Structure` has 3 validation images and 1 test image,
+so its numbers are noise in both directions.
+
+The result that matters is causal, not just numerical: **every class
+whose training data grew improved substantially and consistently; the
+two that did not grow did not reliably improve.** `Structure` remains
+unsolved with 10 training images.
 
 ### How inference works
 
@@ -314,6 +392,13 @@ image → resize 640×640 → YOLOv12 → [class_id, confidence, x1,y1,x2,y2] �
 "On average across classes, how well does the model find objects while
 avoiding false alarms, counting a box correct if it overlaps the true
 box by at least half?"
+
+Reproduce the comparison yourself:
+
+```bash
+./.venv/bin/python tools/compare_models.py test
+./.venv/bin/python tools/compare_models.py val
+```
 
 ### A guard you should know about
 
@@ -368,6 +453,7 @@ Base URL `http://127.0.0.1:5004`. All responses are JSON except
 | GET | `/detections?limit=N` | recent detection history |
 | POST | `/api/detections` | submit a detection record (frontend uses this) |
 | POST | `/detect` | run detection on one uploaded image |
+| GET | `/client-config` | browser-safe config (Maps key from `.env`) |
 | GET | `/config` | current configuration |
 | POST | `/config` | update the confidence threshold |
 | GET | `/video_feed` | MJPEG stream with boxes drawn (needs a camera) |
@@ -386,13 +472,41 @@ curl -F image=@"illegal mining activities/test/images/"*.jpg http://127.0.0.1:50
 
 ---
 
+## Reproducing everything from scratch
+
+```bash
+# environment
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements-dev.txt
+
+# dataset  (reads the two Roboflow sources, writes dataset-phase5/)
+./.venv/bin/python tools/recover_dataset.py --report-only   # inspect
+./.venv/bin/python tools/recover_dataset.py                 # build
+./.venv/bin/python tools/validate_dataset.py dataset-phase5
+
+# train  (~33 min on an M4 Pro)
+./.venv/bin/python tools/train_phase5.py
+
+# evaluate and compare against the Run 6 baseline
+./.venv/bin/python tools/compare_models.py test
+./.venv/bin/python tools/compare_models.py val
+
+# run it
+./tools/run_dev.sh          # backend :5004 + frontend :5501
+
+# test
+./.venv/bin/python -m pytest tests/ -v
+```
+
+---
+
 ## Testing
 
 ```bash
 ./.venv/bin/python -m pytest tests/ -v
 ```
 
-44 tests, ~4 seconds, no running server required (Flask's test client
+56 tests, ~7 seconds, no running server required (Flask's test client
 exercises the app in-process). Each test guards a bug this project
 actually had.
 
@@ -404,6 +518,7 @@ actually had.
 | D Backend API | every endpoint, valid and invalid inputs, synthetic flagging |
 | E Camera | healthy with no camera; `/video_feed` degrades to 503, never 500 |
 | F Frontend | no API key in tracked files, balanced HTML, CSS fixes intact |
+| G Phase 5 | dataset validates, no split leakage, manifest provenance, all labels are boxes, model loads without the fork, embedded names match exactly |
 
 Manual checks:
 
@@ -423,8 +538,9 @@ means editing source.
 | Variable | Default | Meaning |
 |---|---|---|
 | `GALAMSEY_DETECTION_MODE` | `auto` | `auto` / `model` / `mock` |
-| `GALAMSEY_MODEL` | `backend/models/galamsey-run6-baseline.pt` | weights to load |
-| `GALAMSEY_YOLO_IMPL` | `vendored` | `vendored` (yolov12/) or `pip` |
+| `GALAMSEY_MODEL` | `backend/models/galamsey-phase5.pt` | weights to load |
+| `GALAMSEY_YOLO_IMPL` | `pip` | `pip`, or `vendored` for Run 6/8 |
+| `GOOGLE_MAPS_API_KEY` | *(from `.env`)* | served to the browser at `/client-config` |
 | `GALAMSEY_DEVICE` | `auto` | `auto` / `mps` / `cpu` / `cuda` |
 | `GALAMSEY_CONF` | `0.25` | confidence threshold |
 | `GALAMSEY_IOU` | `0.45` | NMS IoU threshold |
@@ -437,8 +553,11 @@ means editing source.
 | `GALAMSEY_CAMERA_INDEX` | `0` | which camera |
 | `GALAMSEY_HISTORY` | `100` | detections kept in memory |
 
-Frontend settings live in `frontend/config.js`; your Maps key goes in
-`frontend/config.local.js` (git-ignored).
+Frontend settings live in `frontend/config.js`. **Your Maps key goes in
+`.env` at the project root** (git-ignored); the backend reads it and
+serves it at `GET /client-config`, so no credential is ever stored in a
+frontend file. `frontend/config.local.js` remains supported as an
+optional fallback for running the frontend without the backend.
 
 ### About the Google Maps key
 
@@ -465,36 +584,43 @@ Real protection is in Google Cloud Console:
 
 **Known and accepted for now:**
 
-1. **The model is weak.** mAP50 0.26. `Structure` and `Vehicle` are
-   never detected. 61 training images is not enough.
-2. **Severe class imbalance** — 61.5× between `Person` (984 objects) and
-   `Vehicle` (16).
-3. **Geofence *drawing* is unavailable.** Google removed
+1. **`Structure` is unsolved.** 10 training images, 3 validation images,
+   1 test image. No amount of retraining fixes that; it needs data.
+2. **`MiningTool` is weak** (0.27 recall) — 41 training images, and the
+   recovered export does not annotate the class at all.
+3. **Class imbalance remains** — 37.8× by object count (improved from
+   61.5×), but 22.4× by image coverage, which is *worse* than before
+   because the recovered images grew four classes and not the other two.
+4. **The model is a nano-scale detector on 399 training images.**
+   mAP50 0.503 is a real, usable result for this data scale, not a
+   production-grade detector.
+5. **Geofence *drawing* is unavailable.** Google removed
    `google.maps.drawing.DrawingManager` in Maps JS API v3.65. Saved
    geofences still display; creating new ones needs a replacement
    implementation. The failure is isolated so it no longer breaks the
    map.
-4. **The `ProcessingEquiment` typo** persists in the data and weights by
-   design (see above).
-5. **Detection history is in memory only** — it is lost on restart.
-6. **No live inference on the webcam stream in the dashboard.** The
+6. **Detection history is in memory only** — it is lost on restart.
+7. **No live inference on the webcam stream in the dashboard.** The
    video panel shows the raw webcam; `/video_feed` is the annotated one.
-7. **No WebSockets.** `frontend/DETECTION_API.md` describes a WebSocket
+8. **No WebSockets.** `frontend/DETECTION_API.md` describes a WebSocket
    contract; nothing in Phase 4 needs push, and polling `/detections` is
    sufficient. Not built on speculation.
-8. **Drone hardware is not integrated.** The Settings dialog still shows
+9. **Drone hardware is not integrated.** The Settings dialog still shows
    drone fields; they are inert.
-9. **The vendored-fork constraint** — see `docs/ARCHITECTURE.md`.
+10. **The vendored fork is still required for the two historical
+    models** (Run 6, Run 8). The production model does not need it.
 
-**Deliberately deferred to Phase 5:**
+**Deferred to Phase 6:**
 
-- Retrain on more data. A neighbouring folder
-  (`~/Downloads/yolov12/yolov12/dataset`) contains **403 photographs not
-  present in this dataset**. They are currently unusable because their
-  class ids follow a different, conflicting schema — a *label* problem,
-  not an *image* problem. Recovering them would multiply the real
-  training data by roughly seven and is the single highest-value
-  improvement available.
+- **Annotate more `Structure` and `MiningTool`.** These are now the only
+  classes holding the model back, and the fix is data, not code.
+- **Consider splitting `ProcessingEquipment`.** Four source classes
+  (`chanfine machine`, `galamsey boat`, `washing machine`, `water pump`)
+  were merged into it. With more data they could be separate classes.
+  See `docs/TAXONOMY_MAPPING.md` §4.1.
+- **Try a larger backbone** (`yolo12s`) now that the dataset supports it.
+- **Persist detection history** to `backend/data/`.
+- **Replace or remove geofence drawing** — Google deleted the library.
 
 ---
 
@@ -513,6 +639,11 @@ The weights were built by the vendored fork and you are running them
 under pip Ultralytics. Set `GALAMSEY_YOLO_IMPL=vendored` (the default).
 See `docs/ARCHITECTURE.md`.
 
+**`AttributeError: module 'numpy' has no attribute 'trapz'`**
+You are evaluating a fork-built model (Run 6/8) with NumPy 2. The shim in
+`tools/evaluate_model.py` handles it; if you hit it elsewhere, alias
+`np.trapz = np.trapezoid` before importing the fork.
+
 **Model refused: "class names do not match"**
 Working as designed — the weights use a different taxonomy. Check the
 model's own names against `backend/taxonomy.py`. Do not "fix" it by
@@ -523,8 +654,9 @@ You almost certainly opened `index.html` from disk. Serve it:
 `./tools/serve_frontend.sh`, then <http://localhost:5501>.
 
 **Map area is grey / "Google Maps API Error"**
-No `frontend/config.local.js`, or the key lacks Maps JavaScript API, or
-billing is off, or the referrer restriction excludes `localhost:5501`.
+No `.env` with `GOOGLE_MAPS_API_KEY`, or the backend is not running (the
+key is served at `/client-config`), or the key lacks Maps JavaScript API,
+or billing is off, or the referrer restriction excludes `localhost:5501`.
 Everything except the map still works.
 
 **`Address already in use` on 5004**
@@ -554,27 +686,34 @@ folder. Verify with `tools/validate_dataset.py`.
 
 Documented so they can be challenged:
 
-1. **Dataset A (`illegal mining activities/`, 87 images) is
-   authoritative.** A larger neighbouring dataset was investigated and
-   rejected: 72 % of its training files use a conflicting class schema
-   (its class 0 is people, class 2 is excavators — the reverse of ours).
-2. **The 182-file "clean subset" of that dataset adds nothing.** It was
-   verified by perceptual hashing to be the *same 61 photographs*,
-   exported three times each with augmentation. Merging it would inflate
-   the file count without adding information and risks split leakage.
-3. **Run 6 is the baseline, not run 8**, despite run 8 scoring higher.
-   Run 8's training dataset has been deleted, so it is unreproducible,
-   and it has 12 classes of which 6 are never used.
-4. **`ProcessingEquiment` stays misspelled** in data and weights until a
-   retrain corrects both together.
-5. **The drone at `192.168.1.100:8080` does not exist.** The frontend
+1. **`dataset-phase5` (536 photographs) is authoritative.** It combines
+   Dataset A with 449 recovered photographs. The contaminated 657-file
+   folder is still rejected: 72 % of its training files use a
+   conflicting class schema.
+2. **The 182-file "clean subset" adds nothing** and was excluded. Verified
+   by perceptual hashing to be the *same 61 photographs* as Dataset A,
+   exported three times each with augmentation.
+3. **The recovered taxonomy mapping is correct.** Established from the
+   source export's own `data.yaml`, corroborated by matching export
+   timestamps, exact image count, byte-identical files, and visual
+   verification of all seven classes. See `docs/TAXONOMY_MAPPING.md`.
+4. **Merging four source classes into `ProcessingEquipment` is
+   acceptable.** All four are ore-processing or water-handling
+   equipment, matching that class's pre-existing definition. Recorded as
+   a possible future split.
+5. **Run 8 is still not used** despite its dataset being found again in
+   Phase 5 — 12 classes for a 6-class project, six of them never
+   predicted or validated.
+6. **`ProcessingEquipment` is now spelled correctly** everywhere; Run 6's
+   old spelling is accepted through one documented alias.
+7. **The drone at `192.168.1.100:8080` does not exist.** The frontend
    was written against a device that was never built; it now talks to
    the local backend instead.
-6. **Illegality is not decided by the model.** No class proves illegality
+8. **Illegality is not decided by the model.** No class proves illegality
    from pixels — legal sites contain excavators too. The backend reports
    *evidence*; the legal/illegal judgement needs geofence context and is
    ultimately a human decision.
-7. **A single environment serves backend, tools and future training.**
+9. **A single environment serves backend, tools and training.**
    PyTorch is large; duplicating it would cost gigabytes for no benefit.
 
 ---

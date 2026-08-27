@@ -9,17 +9,117 @@ one you are allowed to trust. Written during Phase 4.
 
 ## Summary
 
-| File | Classes | mAP50 | Reproducible? | Use |
+| File | Classes | test mAP50 | Reproducible? | Use |
 |---|---|---|---|---|
-| `galamsey-run6-baseline.pt` | **6** | 0.255 | **yes** | baseline for testing the inference pipeline |
-| `archive/galamsey-run8-12class.pt` | 12 | 0.294 | **no** | historical evidence only — **do not deploy** |
+| **`galamsey-phase5.pt`** | **6** | **0.503** | **yes** | **PRODUCTION — the current model** |
+| `galamsey-run6-baseline.pt` | 6 | 0.200 | yes | historical Phase 4 baseline |
+| `archive/galamsey-run8-12class.pt` | 12 | — | yes* | historical evidence — **do not deploy** |
 
-Neither model is production quality. Both are weak. They exist so the
-system can be built and tested end-to-end before Phase 5 retraining.
+\* Run 8's training dataset was believed deleted during Phase 4. It was
+found again in Phase 5 at `~/Documents/yolo/dataset/` (moved from
+`~/Desktop`), so it is technically reproducible after all. It is still
+not used: 12 classes for a 6-class project, with six outputs that were
+never predicted and never validated.
+
+All three `mAP50` figures above are measured on the **same** held-out
+`dataset-phase5` test split with the same conf/IoU settings, so they are
+directly comparable.
 
 ---
 
-## `galamsey-run6-baseline.pt` — the baseline
+## `galamsey-phase5.pt` — the production model
+
+Trained in Phase 5 on the rebuilt 536-photograph dataset.
+
+| | |
+|---|---|
+| Trained | 2026-08-27, 0.55 h on an Apple M4 Pro (MPS) |
+| Base model | `yolo12n.pt` (COCO-pretrained, **pip Ultralytics**) |
+| Architecture | YOLOv12-nano, 2,557,898 parameters |
+| Built by | **Ultralytics 8.3.253 (pip)** — not the vendored fork |
+| Dataset | `dataset-phase5/` — 536 photographs, 2,722 objects |
+| Hyperparameters | 100 epochs, batch 16, imgsz 640, seed 0, optimizer auto, lr0 0.01, patience 100, deterministic |
+| Environment | Python 3.12.11, torch 2.13.0, macOS arm64 |
+
+Hyperparameters were kept **identical to Run 6** so the dataset is the
+only meaningful variable.
+
+**Embedded class names** — an exact match to `backend/taxonomy.py`, with
+the corrected `ProcessingEquipment` spelling. No legacy alias needed:
+
+```
+0 ExcavationMachinery   1 MiningTool   2 Person
+3 ProcessingEquipment   4 Structure    5 Vehicle
+```
+
+### Measured performance (test split)
+
+| Metric | Run 6 | **Phase 5** | change |
+|---|---|---|---|
+| Precision | 0.357 | **0.492** | +0.134 |
+| Recall | 0.268 | **0.558** | +0.290 |
+| mAP50 | 0.200 | **0.503** | **+0.303 (2.5×)** |
+| mAP50-95 | 0.079 | **0.260** | +0.181 (3.3×) |
+
+Per-class recall (test) — every class improved:
+
+| Class | Run 6 | Phase 5 | training data growth |
+|---|---|---|---|
+| ExcavationMachinery | 0.595 | **0.730** | 3.9× |
+| MiningTool | 0.182 | **0.273** | none |
+| Person | 0.616 | **0.812** | 1.5× |
+| ProcessingEquipment | 0.147 | **0.500** | 3.0× |
+| Structure | 0.070 | **0.333** | none |
+| Vehicle | **0.000** | **0.703** | 10.1× |
+
+### What did NOT improve — read this before quoting the numbers
+
+On the **validation** split two classes regressed:
+
+| Class | Run 6 recall | Phase 5 recall | valid support |
+|---|---|---|---|
+| MiningTool | 0.289 | 0.217 | 83 obj / **10 images** |
+| Structure | 0.125 | 0.000 | 8 obj / **3 images** |
+
+These are exactly the two classes whose training data did **not** grow —
+the recovered export annotates neither. Their support is so small
+(`Structure`: 3 validation images, 1 test image) that the per-class
+figures are noise-dominated in both directions.
+
+The causal picture is clean and worth stating plainly: **every class
+whose training data grew improved substantially and consistently; the
+two that did not grow did not reliably improve.** That is evidence for
+the data-recovery hypothesis rather than a lucky headline metric.
+
+**`Structure` remains effectively unsolved** — 10 training images is not
+enough, and no amount of retraining will fix that. It needs more data.
+
+Inference speed improved from 8.16 to 6.05 ms/image.
+
+### No vendored-fork constraint
+
+Because it was trained with pip Ultralytics, this model loads and runs
+under the maintained package with no `sys.path` manipulation. That is
+why `backend/config.py` now defaults to `GALAMSEY_YOLO_IMPL=pip`.
+
+### Supporting artefacts
+
+`backend/models/phase5/` holds `results.csv` (all 100 epochs),
+`args.yaml`, `phase5_environment.json`, the confusion matrix, the
+training curves, and `evaluation_test.json` / `evaluation_val.json`.
+
+### Reproducing it
+
+```bash
+./.venv/bin/python tools/recover_dataset.py
+./.venv/bin/python tools/validate_dataset.py dataset-phase5
+./.venv/bin/python tools/train_phase5.py
+./.venv/bin/python tools/compare_models.py test
+```
+
+---
+
+## `galamsey-run6-baseline.pt` — the superseded Phase 4 baseline
 
 Copied from
 `~/Downloads/yolov12/runs/train_illegal_mining/yolov12_illegal_mining6/weights/best.pt`
@@ -85,7 +185,7 @@ Copied from `.../yolov12_illegal_mining8/weights/best.pt`.
 | Trained | 2025-11-26 09:54 → 16:48 (10.1 h) |
 | Base model | `yolov12n.pt` |
 | Built by | Ultralytics 8.3.63 (vendored fork) |
-| Dataset | `/Users/kwadwo/Desktop/yolo/dataset/data.yaml` — **DELETED** |
+| Dataset | `~/Desktop/yolo/dataset/` — believed deleted in Phase 4; **found in Phase 5** at `~/Documents/yolo/dataset/` |
 | Epochs | 100 (best epoch 55) |
 
 **Embedded class names — 12, not 6:**
@@ -143,8 +243,9 @@ So the backend selects the fork explicitly for inference, and logs which
 implementation it used at startup. Verified working under torch 2.13 on
 CPU (661 ms) and MPS (56 ms) with identical detections.
 
-**Phase 5 retraining with pip `ultralytics` will remove this constraint**
-and produce upstream-compatible weights.
+**Phase 5 did exactly this.** `galamsey-phase5.pt` was trained with pip
+Ultralytics and needs no fork. The constraint now applies only to the
+two historical checkpoints.
 
 ---
 
