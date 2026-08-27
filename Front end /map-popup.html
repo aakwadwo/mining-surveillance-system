@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Location Tracking - Galamsey AI Detector</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Maps JavaScript API -->
+    <!-- IMPORTANT: Make sure your API key has the following APIs enabled:
+         - Maps JavaScript API
+         - Geocoding API
+         - Drawing Library
+         - Geometry Library
+         - Places API (optional, for better search suggestions)
+    -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAlnAXPRMvUBHpJyopugjLkblQ4cHDpMyY&callback=initPopupMap&libraries=drawing,geometry,places"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0e27;
+            color: #fff;
+            overflow: hidden;
+            height: 100vh;
+        }
+        .popup-map-container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+        .popup-map-header {
+            background: rgba(10, 14, 39, 0.95);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid rgba(0, 255, 153, 0.2);
+            z-index: 1000;
+            position: relative;
+        }
+        .popup-map-header h2 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #00FF99;
+            margin-bottom: 1rem;
+        }
+        .popup-map-header-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .popup-map-search-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex: 1;
+            min-width: 250px;
+            max-width: 400px;
+        }
+        .popup-map-search-input {
+            flex: 1;
+            padding: 0.6rem 1rem;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            color: #EAEAEA;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+        .popup-map-search-input:focus {
+            outline: none;
+            border-color: #00FF99;
+            background: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 0 10px rgba(0, 255, 153, 0.2);
+        }
+        .popup-map-search-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+        .popup-map-search-btn {
+            padding: 0.6rem 1rem;
+            background: rgba(0, 255, 153, 0.15);
+            border: 1px solid rgba(0, 255, 153, 0.3);
+            border-radius: 8px;
+            color: #00FF99;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 44px;
+        }
+        .popup-map-search-btn:hover {
+            background: rgba(0, 255, 153, 0.25);
+            border-color: #00FF99;
+        }
+        .popup-map-search-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .popup-map-search-clear {
+            padding: 0.6rem 0.75rem;
+            background: rgba(255, 68, 68, 0.15);
+            border: 1px solid rgba(255, 68, 68, 0.3);
+            border-radius: 8px;
+            color: #FF4444;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 44px;
+        }
+        .popup-map-search-clear:hover {
+            background: rgba(255, 68, 68, 0.25);
+            border-color: #FF4444;
+        }
+        .popup-map-controls {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .popup-map-btn {
+            background: rgba(0, 255, 153, 0.1);
+            border: 1px solid rgba(0, 255, 153, 0.3);
+            color: #00FF99;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            min-width: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .popup-map-btn:hover {
+            background: rgba(0, 255, 153, 0.2);
+            border-color: #00FF99;
+        }
+        .popup-map-btn.active {
+            background: rgba(0, 255, 153, 0.25);
+            border-color: #00FF99;
+            box-shadow: 0 0 10px rgba(0, 255, 153, 0.3);
+        }
+        .popup-map-view {
+            width: 100%;
+            height: calc(100vh - 60px);
+            position: relative;
+            min-height: 400px;
+        }
+        #popupMapView {
+            width: 100%;
+            height: 100%;
+            min-height: 400px;
+        }
+        .popup-map-legend {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(10, 14, 39, 0.9);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(0, 255, 153, 0.2);
+            z-index: 1000;
+        }
+        .popup-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+        }
+        .popup-legend-item:last-child {
+            margin-bottom: 0;
+        }
+        .popup-legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+        }
+        .popup-legend-color.drone {
+            background: #00FF99;
+        }
+        .popup-legend-color.geofence-allowed {
+            background: #00FF99;
+            border: 2px solid #00FF99;
+        }
+        .popup-legend-color.geofence-restricted {
+            background: #FF4444;
+            border: 2px solid #FF4444;
+        }
+        .popup-legend-color.illegal {
+            background: #FF4444;
+        }
+        .popup-legend-color.legal {
+            background: #00FF99;
+        }
+    </style>
+</head>
+<body>
+    <div class="popup-map-container">
+        <div class="popup-map-header">
+            <h2><i class="fas fa-map-marked-alt"></i> Live Location Tracking</h2>
+            <div class="popup-map-header-controls">
+                <div class="popup-map-search-container">
+                    <input type="text" id="popupMapSearchInput" class="popup-map-search-input" placeholder="Search for location...">
+                    <button class="popup-map-search-btn" id="popupMapSearchBtn" title="Search Location">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <button class="popup-map-search-clear" id="popupMapSearchClear" title="Clear Search" style="display: none;">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="popup-map-controls">
+                    <button class="popup-map-btn" id="popupToggleDeviceLocation" title="Toggle Device Location Tracking">
+                        <i class="fas fa-map-marker-alt"></i>
+                    </button>
+                    <button class="popup-map-btn" id="popupZoomIn">+</button>
+                    <button class="popup-map-btn" id="popupZoomOut">-</button>
+                    <button class="popup-map-btn" id="popupGeofenceBtn" title="Draw Geofence">⛶</button>
+                    <button class="popup-map-btn" id="popupGeofenceSaveBtn" title="Save Geofence" style="display: none;">✔</button>
+                    <button class="popup-map-btn" id="popupGeofenceCancelBtn" title="Cancel Geofence" style="display: none;">✖</button>
+                    <button class="popup-map-btn" id="popupCloseBtn" title="Close">
+                        <i class="fas fa-times"></i> Close
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="popup-map-view" id="popupMapView"></div>
+        <div class="popup-map-legend">
+            <div class="popup-legend-item">
+                <div class="popup-legend-color drone"></div>
+                <span>Drone Position</span>
+            </div>
+            <div class="popup-legend-item">
+                <div class="popup-legend-color geofence-allowed"></div>
+                <span>Allowed Mining Area (Green)</span>
+            </div>
+            <div class="popup-legend-item">
+                <div class="popup-legend-color geofence-restricted"></div>
+                <span>Restricted Mining Area (Red)</span>
+            </div>
+            <div class="popup-legend-item">
+                <div class="popup-legend-color illegal"></div>
+                <span>Illegal Sites</span>
+            </div>
+            <div class="popup-legend-item">
+                <div class="popup-legend-color legal"></div>
+                <span>Legal Sites</span>
+            </div>
+        </div>
+    </div>
+    <script src="map-popup.js"></script>
+</body>
+</html>
+

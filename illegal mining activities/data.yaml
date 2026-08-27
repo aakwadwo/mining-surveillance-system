@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 6
+names: ['ExcavationMachinery', 'MiningTool', 'Person', 'ProcessingEquiment', 'Structure', 'Vehicle']
+
+roboflow:
+  workspace: galamsey-zutez
+  project: illegal-mining-activities-o4otu
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/galamsey-zutez/illegal-mining-activities-o4otu/dataset/1

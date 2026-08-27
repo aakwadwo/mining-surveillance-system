@@ -1,0 +1,83 @@
+# =============================================================
+#  Galamsey AI Detector — .gitignore
+#  Anything matched here is invisible to Git.
+#  It stays on your disk; it just never gets committed.
+# =============================================================
+
+# ── macOS junk ───────────────────────────────────────────────
+# Finder writes .DS_Store into every folder you open. Pure noise.
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ── Python virtual environments ──────────────────────────────
+# Hundreds of MB of installed packages. Always rebuildable from
+# requirements.txt, and never portable between machines/OSes.
+venv/
+.venv/
+env/
+ENV/
+
+# ── Python build & cache artifacts ───────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ── Test / lint / type-checker caches ────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# ── Secrets and machine-local config ─────────────────────────
+# NEVER commit real API keys. Commit a .example template instead.
+.env
+.env.*
+!.env.example
+secrets.json
+*.key
+*.pem
+config.local.js
+config.local.json
+
+# ── YOLO / Ultralytics training output ───────────────────────
+# runs/ is regenerated every time you train and holds large
+# checkpoints plus plots. Keep the final model, not the scratch.
+runs/
+wandb/
+*.log
+
+# ── Auto-downloaded pretrained weights ───────────────────────
+# Ultralytics fetches these from the internet on demand.
+yolo11*.pt
+yolov8*.pt
+yolo12*.pt
+yolov12*.pt
+
+# ── ...but DO keep the model WE train. It is a deliverable. ──
+!backend/models/*.pt
+!backend/models/*.onnx
+
+# ── IDE / editor ─────────────────────────────────────────────
+# JetBrains project metadata — personal to your machine.
+.idea/
+
+# VS Code: ignore personal state, but keep shared project config
+# (Front end /.vscode/settings.json records the Live Server port).
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ── Deliberately NOT ignored, for the record ─────────────────
+#   illegal mining activities/   18 MB  — the dataset IS the project
+#   yolov12/                    5.4 MB  — vendored upstream source
+#   Front end /                 280 KB  — the application
+#   backend/*.py                        — the application

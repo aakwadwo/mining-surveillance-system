@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="Advanced AI-powered Galamsey detection system using drone surveillance and real-time analysis">
+    <meta name="keywords" content="galamsey, illegal mining, AI detection, drone surveillance, environmental monitoring">
+    <title>Galamsey AI Detector - Real-time Environmental Monitoring</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Maps JavaScript API -->
+    <!-- IMPORTANT: Make sure your API key has the following APIs enabled:
+         - Maps JavaScript API
+         - Geocoding API
+         - Drawing Library
+         - Geometry Library
+         - Places API (optional, for better search suggestions)
+    -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAlnAXPRMvUBHpJyopugjLkblQ4cHDpMyY&callback=initMap&libraries=drawing,geometry,places"></script>
+</head>
+<body>
+    <!-- Header Section -->
+    <header class="header">
+        <div class="header-content">
+            <div class="title-section">
+                <h1 class="main-title">Galamsey AI Detector</h1>
+                <div class="system-icons">
+                    <div class="icon-group" id="droneStatus">
+                        <i class="fas fa-satellite-dish"></i>
+                        <span class="icon-label">Drone Connected</span>
+                        <div class="status-indicator connected"></div>
+                    </div>
+                    <div class="icon-group" id="alertToggle">
+                        <i class="fas fa-bell"></i>
+                        <span class="icon-label">Alerts</span>
+                        <div class="alert-badge" id="alertBadge" style="display: none;">0</div>
+                    </div>
+                    <div class="icon-group" id="settingsBtn">
+                        <i class="fas fa-cog"></i>
+                        <span class="icon-label">Settings</span>
+                    </div>
+                    <div class="icon-group" id="mapModeBtn">
+                        <i class="fas fa-map"></i>
+                        <span class="icon-label">Map Mode</span>
+                    </div>
+                    <div class="icon-group" id="fullscreenBtn">
+                        <i class="fas fa-expand"></i>
+                        <span class="icon-label">Fullscreen</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Status Banner -->
+            <div class="status-banner" id="statusBanner" style="display: none;">
+                <div class="banner-content">
+                    <i class="fas fa-info-circle"></i>
+                    <span>No device connected</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+        <!-- Left: Live Video Feed -->
+        <section class="video-section">
+            <div class="video-container">
+                <div class="video-header">
+                    <div class="live-indicator">
+                        <div class="recording-dot" style="background: #666;"></div>
+                        <span>OFFLINE</span>
+                    </div>
+                    <div class="video-stats">
+                        <span class="frame-counter">No Video Feed</span>
+                        <span class="detection-count">0 objects detected</span>
+                    </div>
+                </div>
+                
+                <div class="video-feed" id="videoFeed">
+                    <!-- Webcam Video Element -->
+                    <video id="webcamVideo" autoplay playsinline style="display: none; width: 100%; height: 100%; object-fit: cover;"></video>
+                    
+                    <!-- Enhanced Video Background -->
+                    <div class="video-background" id="videoBackground">
+                        <div class="video-placeholder">
+                            <div class="drone-view">
+                                <div class="terrain-texture"></div>
+                                <div class="mining-site"></div>
+                                <div class="water-body"></div>
+                                <div class="vegetation"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- AI Detection Overlays -->
+                    <div class="detection-overlay">
+                        <!-- Detection boxes will be dynamically added here when device is connected -->
+                    </div>
+                    
+                    <!-- Video Controls -->
+                    <div class="video-controls">
+                        <button class="control-btn" id="webcamToggle" title="Toggle Webcam">
+                            <i class="fas fa-video"></i>
+                        </button>
+                        <button class="control-btn" id="playPauseBtn" title="Play/Pause">
+                            <i class="fas fa-pause"></i>
+                        </button>
+                        <button class="control-btn" id="recordBtn" title="Record">
+                            <i class="fas fa-video"></i>
+                        </button>
+                        <button class="control-btn" id="screenshotBtn" title="Screenshot">
+                            <i class="fas fa-camera"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right: Report Panel -->
+        <section class="report-section">
+            <div class="report-panel">
+                <div class="panel-header">
+                    <h3>Detection Report</h3>
+                    <div class="panel-actions">
+                        <button class="action-btn" id="generateReport">
+                            <i class="fas fa-file-pdf"></i>
+                            Generate Report
+                        </button>
+                        <button class="action-btn" id="exportData">
+                            <i class="fas fa-download"></i>
+                            Export Data
+                        </button>
+                        <button class="action-btn" id="viewHistory">
+                            <i class="fas fa-history"></i>
+                            View History
+                        </button>
+                        <button class="action-btn" id="shareAlert">
+                            <i class="fas fa-share"></i>
+                            Share Alert
+                        </button>
+                        <button class="action-btn" id="sendDetectionData" title="Send Current Detection Data">
+                            <i class="fas fa-paper-plane"></i>
+                            Send Detection
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="report-content">
+                    <div class="metadata-item">
+                        <label>Location (GPS):</label>
+                        <span id="gpsLocation">No GPS data available</span>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <label>Time:</label>
+                        <span id="currentTime">2025-01-14 14:23 GMT</span>
+                    </div>
+                    
+                    <div class="detected-tools">
+                        <label>Detected Tools:</label>
+                        <div class="tool-list" id="toolList">
+                            <!-- Detected tools will be dynamically added here -->
+                        </div>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <label>Confidence:</label>
+                        <span class="confidence-value" id="confidenceValue">0%</span>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <label>Site Type:</label>
+                        <span class="site-type" id="siteType">No detections</span>
+                    </div>
+                    
+                    <div class="metadata-item">
+                        <label>Environment:</label>
+                        <span id="environment">Waiting for data...</span>
+                    </div>
+                    
+                    <div class="suggested-action">
+                        <label>Suggested Action:</label>
+                        <span id="suggestedAction">Connect device to begin monitoring</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Bottom Map Section -->
+    <section class="map-section">
+        <div class="map-container">
+            <div class="map-header">
+                <h3>Live Location Tracking</h3>
+                <div class="map-header-controls">
+                    <div class="map-search-container">
+                        <input type="text" id="mapSearchInput" class="map-search-input" placeholder="Search for location...">
+                        <button class="map-search-btn" id="mapSearchBtn" title="Search Location">
+                            <i class="fas fa-search"></i>
+                        </button>
+                        <button class="map-search-clear" id="mapSearchClear" title="Clear Search" style="display: none;">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="map-controls">
+                        <button class="map-btn" id="openMapPopup" title="Open in Separate Window">
+                            <i class="fas fa-external-link-alt"></i>
+                        </button>
+                        <button class="map-btn" id="toggleDeviceLocation" title="Toggle Device Location Tracking">
+                            <i class="fas fa-map-marker-alt"></i>
+                        </button>
+                        <button class="map-btn" id="zoomIn">+</button>
+                        <button class="map-btn" id="zoomOut">-</button>
+                        <button class="map-btn" id="geofenceBtn" title="Draw Geofence">⛶</button>
+                        <button class="map-btn" id="geofenceSaveBtn" title="Save Geofence" style="display: none;">✔</button>
+                        <button class="map-btn" id="geofenceCancelBtn" title="Cancel Geofence" style="display: none;">✖</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="map-view" id="mapView">
+                <!-- Google Map will be rendered here -->
+                
+                <!-- Map Legend -->
+                <div class="map-legend">
+                    <div class="legend-item">
+                        <div class="legend-color drone"></div>
+                        <span>Drone Position</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color geofence-allowed"></div>
+                        <span>Allowed Mining Area (Green)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color geofence-restricted"></div>
+                        <span>Restricted Mining Area (Red)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color illegal"></div>
+                        <span>Illegal Sites</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color legal"></div>
+                        <span>Legal Sites</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <span class="watermark">Powered by YOLOv8 + GeoAI</span>
+            <span class="developer">Developed by Environmental AI Solutions – 2025</span>
+        </div>
+    </footer>
+
+    <!-- Notification Toast -->
+    <div class="toast-container" id="toastContainer"></div>
+    
+    <!-- Alerts Modal -->
+    <div class="modal-overlay" id="alertsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Alert History</h3>
+                <button class="modal-close" id="closeAlerts">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="alert-feed" id="alertFeed">
+                    <!-- Alerts will be dynamically added here -->
+                    <div class="no-alerts" style="text-align: center; padding: 2rem; color: #999;">
+                        <i class="fas fa-bell-slash" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
+                        <p>No alerts yet</p>
+                        <small>Alerts will appear here when detections occur</small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="clearAlerts">Clear All</button>
+                <button class="btn-primary" id="closeAlertsBtn">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>System Settings</h3>
+                <button class="modal-close" id="closeSettings">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Drone Connection Section -->
+                <div class="settings-section">
+                    <h4>Drone Connection</h4>
+                    <div class="setting-group">
+                        <label>Drone IP Address</label>
+                        <input type="text" id="droneIP" placeholder="192.168.1.100" value="192.168.1.100">
+                    </div>
+                    <div class="setting-group">
+                        <label>Connection Port</label>
+                        <input type="number" id="dronePort" placeholder="8080" value="8080" min="1000" max="65535">
+                    </div>
+                    <div class="setting-group">
+                        <label>Connection Protocol</label>
+                        <select id="droneProtocol">
+                            <option value="rtsp">RTSP</option>
+                            <option value="webrtc" selected>WebRTC</option>
+                            <option value="http">HTTP Stream</option>
+                        </select>
+                    </div>
+                    <div class="setting-group">
+                        <label>Auto-Connect on Startup</label>
+                        <input type="checkbox" id="autoConnect" checked>
+                    </div>
+                    <div class="setting-group">
+                        <label>Connection Timeout (seconds)</label>
+                        <input type="range" id="connectionTimeout" min="5" max="60" value="30">
+                        <span id="timeoutValue">30s</span>
+                    </div>
+                    <div class="setting-group">
+                        <button class="btn-primary" id="testConnection">Test Connection</button>
+                        <button class="btn-secondary" id="connectDrone">Connect Drone</button>
+                    </div>
+                </div>
+
+                <!-- Detection Settings Section -->
+                <div class="settings-section">
+                    <h4>Detection Settings</h4>
+                    <div class="setting-group">
+                        <label>Detection Sensitivity</label>
+                        <input type="range" id="sensitivitySlider" min="0" max="100" value="75">
+                        <span id="sensitivityValue">75%</span>
+                    </div>
+                <div class="setting-group">
+                    <label>Alert Threshold</label>
+                    <input type="range" id="thresholdSlider" min="0" max="100" value="80">
+                    <span id="thresholdValue">80%</span>
+                </div>
+
+                <!-- Geofence Data (Ghana) -->
+                <div class="settings-section">
+                    <h4>Geofence Data (Ghana)</h4>
+                    <div class="setting-group">
+                        <label>
+                            <input type="checkbox" id="autoLoadGhanaGeofences">
+                            Auto-load Ghana forest reserves and rivers
+                        </label>
+                    </div>
+                    <div class="setting-group">
+                        <label>Existing Geofences</label>
+                        <div class="geofence-list" id="geofenceList">
+                            <div class="geofence-empty">No geofences added yet</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-group">
+                    <label>Auto-Export Reports</label>
+                    <input type="checkbox" id="autoExport" checked>
+                </div>
+                <div class="setting-group">
+                    <label>Sound Alerts</label>
+                    <input type="checkbox" id="soundAlerts" checked>
+                </div>
+                <div class="setting-group">
+                    <label>Update Frequency</label>
+                    <select id="updateFrequency">
+                        <option value="1000">1 second</option>
+                        <option value="2000" selected>2 seconds</option>
+                        <option value="5000">5 seconds</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="resetSettings">Reset</button>
+                <button class="btn-primary" id="saveSettings">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading Screen -->
+    <div class="loading-screen" id="loadingScreen">
+        <div class="loading-content">
+            <div class="loading-logo">
+                <i class="fas fa-satellite-dish"></i>
+            </div>
+            <h2>Galamsey AI Detector</h2>
+            <div class="loading-bar">
+                <div class="loading-progress" id="loadingProgress"></div>
+            </div>
+            <p id="loadingText">Initializing AI Detection System...</p>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
