@@ -4,7 +4,12 @@ A computer-vision system for detecting illegal small-scale gold mining
 (*galamsey*) activity in Ghana from camera or drone imagery, with a web
 dashboard that plots detections on a map against geofenced areas.
 
-> **Project status: working end-to-end pipeline, usable model.**
+> **Project status: live end-to-end application.**
+> The dashboard now runs real detection on your camera:
+> `camera → /api/detect → galamsey-phase5.pt → bounding boxes`, with the
+> Detection Report, statistics and alerts all driven by the same real
+> inference result, and detection history persisted to SQLite.
+>
 > Backend, frontend, dataset and inference all work and are tested.
 > Phase 5 recovered 449 additional photographs, rebuilt the dataset, and
 > retrained: **test mAP50 improved from 0.200 to 0.503 (2.5×)**, with
@@ -448,11 +453,12 @@ Base URL `http://127.0.0.1:5004`. All responses are JSON except
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/` | index of all endpoints |
+| **POST** | **`/api/detect`** | **run the model on one image — THE inference endpoint** |
 | GET | `/health` | server, model, camera and taxonomy status |
 | GET | `/statistics` | detection counts this session |
-| GET | `/detections?limit=N` | recent detection history |
+| GET | `/detections?limit=N` | **persisted** detection history (survives restart) |
 | POST | `/api/detections` | submit a detection record (frontend uses this) |
-| POST | `/detect` | run detection on one uploaded image |
+| POST | `/detect` | deprecated alias of `/api/detect` (Phase 4 shape) |
 | GET | `/client-config` | browser-safe config (Maps key from `.env`) |
 | GET | `/config` | current configuration |
 | POST | `/config` | update the confidence threshold |
@@ -467,8 +473,114 @@ this right now.
 
 ```bash
 curl http://127.0.0.1:5004/health
-curl -F image=@"illegal mining activities/test/images/"*.jpg http://127.0.0.1:5004/detect
+curl -F image=@dataset-phase5/test/images/*.jpg http://127.0.0.1:5004/api/detect
 ```
+
+### `POST /api/detect` — the contract
+
+```json
+{
+  "success": true,
+  "detections": [
+    {"class_id": 2, "class_name": "Person", "confidence": 0.9527,
+     "bbox": {"x1": 104, "y1": 132, "x2": 146, "y2": 243}}
+  ],
+  "image_width": 639,
+  "image_height": 426,
+  "inference_time_ms": 108.0,
+  "synthetic": false
+}
+```
+
+`bbox` coordinates are **pixels in the submitted image** — which is why
+`image_width`/`image_height` come back with them. A client cannot scale
+correctly without knowing what the coordinates are relative to.
+
+| Status | Meaning |
+|---|---|
+| 200 | inference ran |
+| 400 | no image / empty upload / undecodable bytes |
+| 503 | the model is not loaded — **never** substituted with fake data |
+| 500 | unexpected failure (logged server-side) |
+
+---
+
+## How live detection works
+
+```
+   <video>            the browser renders your camera, 30-60 fps,
+      |               hardware accelerated — the backend never touches it
+      |  every 1500 ms
+      v
+   offscreen <canvas>  one frame, downscaled to 960px wide
+      |
+      v  toBlob -> JPEG
+   POST /api/detect
+      |
+      v
+   galamsey-phase5.pt  real YOLOv12 inference, ~40-110 ms on MPS
+      |
+      v  JSON
+   ONE result object drives everything:
+      +-- bounding-box overlay   (absolutely-positioned divs ON TOP)
+      +-- Detection Report
+      +-- confidence / site type / suggested action
+      +-- alerts
+      +-- persisted event (SQLite)
+```
+
+**Why the overlay is a separate layer.** The backend *could* draw boxes
+onto the frame and send back a picture. It doesn't: the browser already
+renders video smoothly for free, so round-tripping every frame through
+Python would make it jerky for no gain. Burned-in boxes also can't be
+restyled, hidden or made accessible — and video (smooth) and detections
+(~every 1.5 s) update at different rates.
+
+**Why only one request is ever in flight.** `setInterval(send, 100)`
+would post frames faster than ~110 ms inference can drain them; the
+queue grows without limit and boxes fall further behind reality. The
+loop is `capture → infer → render → WAIT → repeat` with an explicit
+in-flight guard, so a slow cycle just delays the next one.
+
+**Coordinate scaling.** Three spaces are involved: the frame we POSTed
+(e.g. 960×540), the `<video>` element's box (e.g. 1004×565), and the
+picture as actually painted inside it. The video is `object-fit: cover`,
+so it's scaled to *fill* and *cropped* — not stretched:
+
+```
+scale   = max(boxW/srcW, boxH/srcH)     ← max, not min
+offsetX = (boxW - srcW*scale) / 2       ← negative when cropped
+screenX = srcX*scale + offsetX
+```
+
+Naive scaling ignores the crop and misplaces every box in a way that
+looks *almost* right. Boxes are recomputed on window resize.
+
+Tunable in `frontend/config.js`: `DETECTION_INTERVAL_MS` (1500),
+`DETECTION_MAX_WIDTH` (960), `DETECTION_JPEG_QUALITY` (0.8).
+
+| Interval | Effect |
+|---|---|
+| 200 ms | boxes track closely, backend ~55 % busy, laptop heats up |
+| **1500 ms** | **backend ~93 % idle, boxes feel current** |
+| 5 s | almost free, but boxes visibly lag |
+
+Mining sites do not change in 200 ms.
+
+---
+
+## Detection history
+
+Events are persisted to **SQLite** at `backend/data/detections.db` — part
+of the Python standard library, so this adds **no new dependencies** and
+no server to run. History survives a backend restart.
+
+**Events, not frames.** Only cycles that actually detected something are
+stored, and consecutive identical results within 10 s count as one
+ongoing event. Standing in front of the camera for a minute produces one
+row, not forty. **Raw frames are never stored** — we keep what the model
+concluded, not the pixels, which is a privacy decision as much as a disk
+one. Capped at 5000 events (`GALAMSEY_HISTORY_MAX`), oldest trimmed.
 
 ---
 
@@ -551,7 +663,9 @@ means editing source.
 | `GALAMSEY_CORS_ORIGINS` | `http://localhost:5501,http://127.0.0.1:5501` | allowed browser origins |
 | `GALAMSEY_CAMERA` | `1` | `0` disables the camera entirely |
 | `GALAMSEY_CAMERA_INDEX` | `0` | which camera |
-| `GALAMSEY_HISTORY` | `100` | detections kept in memory |
+| `GALAMSEY_HISTORY` | `100` | default page size for `/detections` |
+| `GALAMSEY_HISTORY_DB` | `backend/data/detections.db` | history database path |
+| `GALAMSEY_HISTORY_MAX` | `5000` | max stored events before trimming |
 
 Frontend settings live in `frontend/config.js`. **Your Maps key goes in
 `.env` at the project root** (git-ignored); the backend reads it and
@@ -594,11 +708,15 @@ Real protection is in Google Cloud Console:
 4. **The model is a nano-scale detector on 399 training images.**
    mAP50 0.503 is a real, usable result for this data scale, not a
    production-grade detector.
-5. **Geofence *drawing* is unavailable.** Google removed
-   `google.maps.drawing.DrawingManager` in Maps JS API v3.65. Saved
-   geofences still display; creating new ones needs a replacement
-   implementation. The failure is isolated so it no longer breaks the
-   map.
+5. **Geofence *creation* is genuinely broken, and not faked.** Google
+   removed `google.maps.drawing.DrawingManager` in Maps JavaScript API
+   v3.65. Saved geofences still render, and clicking the geofence button
+   shows an honest explanation rather than silently doing nothing. It has
+   **not** been replaced with a stub that pretends to work. Restoring it
+   needs a replacement drawing implementation, which is deliberately out
+   of scope: the detection pipeline was the priority, and a fake
+   geofence would be worse than an absent one because alerts would
+   appear to have location context they do not have.
 6. **Detection history is in memory only** — it is lost on restart.
 7. **No live inference on the webcam stream in the dashboard.** The
    video panel shows the raw webcam; `/video_feed` is the annotated one.

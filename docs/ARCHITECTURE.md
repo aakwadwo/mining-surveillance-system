@@ -269,6 +269,81 @@ and API restrictions and a quota cap.
 
 ---
 
+## 10b. Live detection: three layers, three owners
+
+Phase 6 connected the camera to the model. The design rule is that each
+layer has exactly one owner:
+
+| Layer | Owner | Rate |
+|---|---|---|
+| the picture | the **browser** (`<video>`, hardware accelerated) | 30-60 fps |
+| the inference | the **backend** (`/api/detect` -> YOLOv12) | ~1 per 1.5 s |
+| the boxes | the **frontend** (absolutely-positioned divs) | on each result |
+
+Sending frames to Python to have rectangles drawn on them would collapse
+all three into one, make the video jerky, and produce boxes that cannot
+be restyled, hidden or made accessible.
+
+### The in-flight guard
+
+`setInterval(send, 100)` posts faster than ~110 ms inference can drain.
+The queue grows without limit, memory climbs, and the boxes drift
+further behind the picture - a classic unbounded-producer bug. The loop
+is therefore `capture -> infer -> render -> WAIT -> repeat` with an
+explicit `inFlight` flag. Under load the system degrades by *slowing
+down*, which is what you want, rather than by falling over.
+
+### The coordinate trap
+
+Three coordinate spaces, all different: the frame POSTed, the `<video>`
+element's box, and the picture actually painted inside it. Because the
+video is `object-fit: cover`, the painted picture is generally BIGGER
+than the element and centred, with parts cropped off.
+
+Naive scaling (`x * elementWidth / sourceWidth`) ignores the crop and is
+wrong everywhere - but only slightly, so it looks plausible and survives
+casual review. The correct transform uses `max` (fill) rather than `min`
+(fit), plus a centring offset that goes negative when cropped.
+
+This is worth remembering generally: a transform that is *almost* right
+is harder to catch than one that is obviously broken.
+
+### Detection is not a legal verdict
+
+The overlay, the report and the alerts all read from the same response,
+so they cannot disagree. But "Site Type" reports what the model SAW, and
+alerts fire only on machinery/processing equipment above 0.5 confidence
+- never on `Person` alone. A person at a mining site is not evidence of
+a crime, and a system that implies otherwise is worse than one that says
+nothing. See section 5.
+
+---
+
+## 10c. Persistence: SQLite, and why nothing bigger
+
+`GET /detections` used to be an in-memory deque - a live buffer
+pretending to be history. It is now SQLite at
+`backend/data/detections.db`.
+
+SQLite ships with Python: no new dependency, no server, one file. A
+database server would add installation, configuration, running and
+backup burden for a single-user dashboard holding a few thousand rows.
+The moment to reach for one is when multiple writers on different
+machines need the same data - not before.
+
+Two policies keep the store meaningful rather than merely large:
+
+  * **events, not frames** - only cycles that detected something, with
+    consecutive identical results inside 10 s collapsed into one event
+  * **conclusions, not pixels** - classes, confidences, boxes, timing
+    and location are stored; camera frames never are. That is a privacy
+    decision as much as a storage one.
+
+Retention is capped at 5000 rows. An explicit, documented limit beats
+unbounded growth that nobody notices until the disk is full.
+
+---
+
 ## 11. What Phase 5 did, and what Phase 6 should do
 
 ### Done in Phase 5
@@ -288,7 +363,13 @@ The controlled part matters: hyperparameters were held **identical** to
 Run 6, so the dataset was the only variable. Changing both at once would
 have made the improvement unattributable.
 
-### Phase 6, in order
+### Phase 6 (done)
+
+Connected the camera to the model, rendered real boxes, drove the whole
+dashboard from one inference result, and made history persistent. See
+sections 10b and 10c.
+
+### Phase 7, in order
 
 1. **Annotate `Structure` and `MiningTool`.** They are the only classes
    still failing, they are the two the recovered export did not cover,
