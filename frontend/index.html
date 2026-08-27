@@ -9,15 +9,12 @@
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Maps JavaScript API -->
-    <!-- IMPORTANT: Make sure your API key has the following APIs enabled:
-         - Maps JavaScript API
-         - Geocoding API
-         - Drawing Library
-         - Geometry Library
-         - Places API (optional, for better search suggestions)
-    -->
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAlnAXPRMvUBHpJyopugjLkblQ4cHDpMyY&callback=initMap&libraries=drawing,geometry,places"></script>
+    <!-- Configuration. config.local.js is git-ignored and holds the
+         Google Maps API key; see config.local.example.js.
+         Google Maps itself is injected by config.js AFTER the
+         callback exists, which removes the old load-order race. -->
+    <script src="config.js"></script>
+    <script src="config.local.js" onerror="console.warn('[galamsey] no config.local.js - map disabled')"></script>
 </head>
 <body>
     <!-- Header Section -->
@@ -253,7 +250,7 @@
     <!-- Footer -->
     <footer class="footer">
         <div class="footer-content">
-            <span class="watermark">Powered by YOLOv8 + GeoAI</span>
+            <span class="watermark">Powered by YOLOv12 + GeoAI</span>
             <span class="developer">Developed by Environmental AI Solutions – 2025</span>
         </div>
     </footer>
@@ -380,7 +377,11 @@
             </div>
         </div>
     </div>
-    
+    </div><!-- /#settingsModal : this closing tag was MISSING, so the
+                  browser auto-closed the modal at </body> and the loading
+                  screen became a CHILD of the settings dialog. Opening
+                  Settings then rendered a blank full-screen overlay. -->
+
     <!-- Loading Screen -->
     <div class="loading-screen" id="loadingScreen">
         <div class="loading-content">
@@ -396,5 +397,19 @@
     </div>
 
     <script src="script.js"></script>
+    <script>
+        // Define the Maps callback BEFORE requesting the script, so the
+        // API can never call a function that does not exist yet.
+        window.initMap = function () {
+            if (window.detectorInstance) {
+                window.detectorInstance.initializeGoogleMap();
+            }
+        };
+        // script.js registers its own DOMContentLoaded handler first, so
+        // window.detectorInstance already exists by the time this runs.
+        document.addEventListener("DOMContentLoaded", function () {
+            window.GALAMSEY_LOAD_MAPS("initMap");
+        });
+    </script>
 </body>
 </html>

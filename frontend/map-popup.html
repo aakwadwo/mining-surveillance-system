@@ -6,15 +6,9 @@
     <title>Live Location Tracking - Galamsey AI Detector</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Maps JavaScript API -->
-    <!-- IMPORTANT: Make sure your API key has the following APIs enabled:
-         - Maps JavaScript API
-         - Geocoding API
-         - Drawing Library
-         - Geometry Library
-         - Places API (optional, for better search suggestions)
-    -->
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAlnAXPRMvUBHpJyopugjLkblQ4cHDpMyY&callback=initPopupMap&libraries=drawing,geometry,places"></script>
+    <!-- Configuration; the API key lives in the git-ignored config.local.js -->
+    <script src="config.js"></script>
+    <script src="config.local.js" onerror="console.warn('[galamsey] no config.local.js - map disabled')"></script>
     <style>
         * {
             margin: 0;
@@ -255,6 +249,7 @@
         </div>
     </div>
     <script src="map-popup.js"></script>
+    <script>window.GALAMSEY_LOAD_MAPS("initPopupMap");</script>
 </body>
 </html>
 

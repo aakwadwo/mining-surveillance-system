@@ -38,7 +38,13 @@ body {
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    opacity: 0;
+    /* FIXED: was opacity: 0.
+       The page was invisible until JavaScript set body.style.opacity='1'.
+       If script.js failed to load, 404'd, or threw during parsing, the
+       user got a permanently blank page with no visible error.
+       CSS must never depend on JS to make content visible. The fade-in
+       is still provided by #loadingScreen, which JS fades out. */
+    opacity: 1;
     transition: opacity 0.5s ease;
 }
 
@@ -274,10 +280,22 @@ body::before {
 /* Main Content */
 .main-content {
     display: grid;
-    grid-template-columns: 70rem 1fr;
+    /* FIXED: was `70rem 1fr`.
+       70rem is a FIXED 1120px. Plus the 2rem gap and 4rem of padding,
+       the grid needed 1216px before the report panel got a single
+       pixel. The only override was @media (max-width: 1200px), so on
+       any screen from 1201px upward - i.e. every laptop - the report
+       column was crushed and the overflow was silently clipped by
+       body{overflow-x:hidden}.
+
+       minmax(0, 1fr) lets the video column shrink (a bare 1fr refuses
+       to go below its content's min-content width, which is what
+       causes grid blowout), and the report column is held between a
+       readable 300px and its intended 400px. */
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
     gap: 2rem;
-    padding: 3rem 1rem 3rem 3rem;
-    max-width: 100%;
+    padding: 2rem 1.5rem;
+    max-width: 1920px;
     margin: 0 auto;
     min-height: 100vh;
 }
@@ -1916,14 +1934,17 @@ html:-ms-fullscreen {
 
 /* Responsive Design */
 @media (max-width: 1200px) {
+    /* FIXED: this block set grid-column on .report-panel, but the grid
+       ITEM is .report-section - .report-panel is its child, so the rule
+       did nothing. Below 1200px there is not enough width for two
+       columns, so stack them instead. */
     .main-content {
-        grid-template-columns: 1fr 1fr;
-        gap: 1rem;
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
     }
-    
-    .report-panel {
-        grid-column: 1 / -1;
-        order: 1;
+
+    .report-section {
+        max-width: 100%;
     }
 }
     
@@ -1954,9 +1975,8 @@ html:-ms-fullscreen {
         grid-template-columns: 1fr;
     }
     
-    .report-panel {
-        grid-column: 1;
-        order: 1;
+    .report-section {
+        max-width: 100%;
     }
     
     .video-container {

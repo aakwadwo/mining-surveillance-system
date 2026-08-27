@@ -13,15 +13,33 @@ class GalamseyDetector {
         this.mediaRecorder = null;
         this.recordedChunks = [];
         this.isRecording = false;
-        this.detectionData = {
-            excavator: { confidence: 0, detected: false, position: { x: 0, y: 0 } },
-            pump: { confidence: 0, detected: false, position: { x: 0, y: 0 } },
-            washplant: { confidence: 0, detected: false, position: { x: 0, y: 0 } }
-        };
+        // FIXED: these were 'excavator', 'pump', 'washplant' - a vocabulary
+        // that exists nowhere else in the project. The model emits exactly
+        // six classes, defined in backend/taxonomy.py and mirrored in
+        // config.js. A detector outputs a NUMBER; if the frontend and the
+        // model disagree about what that number means, the UI shows a
+        // confident, silent, wrong label.
+        this.detectionData = {};
+        (window.GALAMSEY_CONFIG ? window.GALAMSEY_CONFIG.CLASSES : []).forEach(c => {
+            this.detectionData[c.name] = {
+                classId: c.id,
+                display: c.display,
+                confidence: 0,
+                detected: false,
+                position: { x: 0, y: 0 }
+            };
+        });
         this.alertHistory = [];
+        // FIXED: these were hardcoded to total:47, legal:23, illegal:24 and
+        // displayed as if they were real results. Now they start at zero
+        // and are replaced by real counts from the backend /statistics
+        // endpoint. `synthetic` records whether the backend is in mock
+        // mode, so the UI can never present placeholder data as AI output.
         this.statistics = {
-            today: { total: 47, legal: 23, illegal: 24 },
-            trends: { detection: '+12%', legal: '+5%', illegal: '+3%' }
+            today: { total: 0, legal: 0, illegal: 0 },
+            trends: { detection: '--', legal: '--', illegal: '--' },
+            synthetic: null,
+            backendMode: 'unknown'
         };
         
         // Settings configuration
@@ -289,6 +307,50 @@ class GalamseyDetector {
         setInterval(() => {
             this.updateStatistics();
         }, 5000);
+    }
+
+    /**
+     * FIXED: this method was called every 5 seconds by startRealTimeUpdates()
+     * and again by updateUpdateFrequency(), but was NEVER DEFINED anywhere in
+     * this file. Every call threw "this.updateStatistics is not a function".
+     * Because the calls sit inside setInterval, the error did not stop the
+     * page - it just flooded the console forever and the statistics never
+     * updated.
+     *
+     * It now pulls real counts from the backend. If the backend is not
+     * running the UI simply keeps its last values; it never invents numbers.
+     */
+    async updateStatistics() {
+        const cfg = window.GALAMSEY_CONFIG;
+        if (!cfg || !cfg.BACKEND_URL) return;
+
+        try {
+            const response = await fetch(`${cfg.BACKEND_URL}/statistics`, { cache: 'no-store' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+
+            this.statistics.today.total = data.total_detections || 0;
+            this.statistics.synthetic = data.synthetic;
+            this.statistics.backendMode = data.mode || 'unknown';
+            this.backendOnline = true;
+
+            // Never let mock data masquerade as a real result.
+            const banner = document.getElementById('statusBanner');
+            if (banner && data.synthetic) {
+                banner.style.display = '';
+                const content = banner.querySelector('.banner-content');
+                if (content) {
+                    content.innerHTML =
+                        '<i class="fas fa-flask"></i><span>MOCK MODE - synthetic data, not AI output</span>';
+                }
+            }
+        } catch (error) {
+            this.backendOnline = false;
+            if (!this._statsWarned) {
+                console.warn('[galamsey] backend unreachable at', cfg.BACKEND_URL, '-', error.message);
+                this._statsWarned = true;
+            }
+        }
     }
 
     setupEventListeners() {
@@ -1874,7 +1936,11 @@ Powered by YOLOv8 + GeoAI
      * @param {Object} payload - Detection payload to send
      */
     async sendDetectionDataViaAPI(payload) {
-        const apiUrl = `http://${this.settings.droneIP}:${this.settings.dronePort}/api/detections`;
+        // FIXED: was http://${droneIP}:${dronePort}/api/detections - a drone at
+        // 192.168.1.100:8080 that does not exist, so every send failed into
+        // the localStorage retry queue forever. Now points at the real
+        // backend, configured in config.js.
+        const apiUrl = `${window.GALAMSEY_CONFIG.BACKEND_URL}/api/detections`;
         
         try {
             const response = await fetch(apiUrl, {
@@ -1945,7 +2011,11 @@ Powered by YOLOv8 + GeoAI
             const queue = JSON.parse(localStorage.getItem('detectionQueue') || '[]');
             if (queue.length === 0) return;
 
-            const apiUrl = `http://${this.settings.droneIP}:${this.settings.dronePort}/api/detections`;
+            // FIXED: was http://${droneIP}:${dronePort}/api/detections - a drone at
+        // 192.168.1.100:8080 that does not exist, so every send failed into
+        // the localStorage retry queue forever. Now points at the real
+        // backend, configured in config.js.
+        const apiUrl = `${window.GALAMSEY_CONFIG.BACKEND_URL}/api/detections`;
             const successful = [];
 
             for (let i = 0; i < queue.length; i++) {
@@ -2352,8 +2422,26 @@ Powered by YOLOv8 + GeoAI
             this.loadGeofences();
             this.renderSavedGeofencesOnMap();
 
-            // Setup drawing manager for geofence creation
-            this.setupDrawingManager();
+            // Setup drawing manager for geofence creation.
+            // FIXED: Google REMOVED google.maps.drawing.DrawingManager in Maps
+            // JavaScript API v3.65, so this constructor now throws. Because the
+            // call sat in the middle of this sequence, the exception aborted
+            // map initialisation before initializeGeocoding(), updateMapControls(),
+            // `mapInitialized = true`, location tracking and detection
+            // transmission ever ran - the map appeared as a blank grey panel.
+            // A single removed optional feature must not take the whole map
+            // down with it, so it is isolated here.
+            try {
+                this.setupDrawingManager();
+            } catch (drawingError) {
+                console.warn(
+                    '[galamsey] Geofence drawing unavailable:', drawingError.message,
+                    '\nGoogle removed DrawingManager in Maps JS API v3.65.',
+                    'Saved geofences still display; drawing new ones needs a',
+                    'replacement implementation (Phase 5).'
+                );
+                this.drawingManager = null;
+            }
 
             // Initialize Geocoding API
             this.initializeGeocoding();
@@ -3223,7 +3311,23 @@ Powered by YOLOv8 + GeoAI
      */
     toggleGeofenceDrawingMode() {
         if (!this.drawingManager) {
-            this.setupDrawingManager();
+            // FIXED: this called setupDrawingManager() and then used the result
+            // unconditionally. Since Google removed DrawingManager in Maps JS
+            // v3.65 the retry always fails, and the next line threw
+            // "Cannot read properties of null". Tell the user plainly instead.
+            try {
+                this.setupDrawingManager();
+            } catch (e) {
+                this.drawingManager = null;
+            }
+            if (!this.drawingManager) {
+                this.showToast(
+                    'Geofence drawing is unavailable: Google removed the Drawing library ' +
+                    'from the Maps API (v3.65). Existing geofences still display.',
+                    'illegal'
+                );
+                return;
+            }
         }
 
         this.isGeofenceMode = !this.isGeofenceMode;
