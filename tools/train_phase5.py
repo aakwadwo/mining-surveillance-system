@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """
-Phase 5 training run.
+Reproducible YOLOv12 training run.
 
-    ./.venv/bin/python tools/train_phase5.py                 # full run
-    ./.venv/bin/python tools/train_phase5.py --epochs 2      # smoke test
-    ./.venv/bin/python tools/train_phase5.py --name my-run
+    ./.venv/bin/python tools/train_phase5.py                  # reproduce Phase 5
+    ./.venv/bin/python tools/train_phase5.py --epochs 2       # smoke test
+    ./.venv/bin/python tools/train_phase5.py \
+        --data dataset-phase6/data.yaml --name yolo12n-phase6
+
+The defaults reproduce the CURRENT baseline exactly. For the next
+experiment, change --data and --name and NOTHING ELSE: if the dataset is
+the only variable, an improvement can be attributed to the data rather
+than to five simultaneous changes.
 
 ------------------------------------------------------------------
 WHY THIS USES pip ULTRALYTICS, NOT THE VENDORED FORK
@@ -48,7 +54,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "backend"))
 import taxonomy  # noqa: E402
 
-DATA_YAML = PROJECT_ROOT / "dataset-phase5" / "data.yaml"
+DEFAULT_DATA_YAML = PROJECT_ROOT / "dataset-phase5" / "data.yaml"
 RUNS_DIR = PROJECT_ROOT / "runs" / "phase5"
 
 # --- Hyperparameters: matched to Run 6 so the dataset is the variable ---
@@ -79,7 +85,16 @@ def main() -> int:
     ap.add_argument("--imgsz", type=int, default=IMGSZ)
     ap.add_argument("--name", default="yolo12n-phase5")
     ap.add_argument("--device", default=None)
+    # A future run trains on a LARGER dataset while keeping every other
+    # setting identical, so the dataset is the only variable and any
+    # improvement can be attributed to the data. That requires pointing
+    # this script at a different data.yaml without editing it.
+    ap.add_argument("--data", default=str(DEFAULT_DATA_YAML),
+                    help="path to the dataset's data.yaml "
+                         "(default: dataset-phase5/data.yaml)")
     args = ap.parse_args()
+
+    data_yaml = Path(args.data).expanduser().resolve()
 
     import torch
     import ultralytics
@@ -91,8 +106,9 @@ def main() -> int:
         print(f"       ultralytics loaded from {ul_path}")
         return 1
 
-    if not DATA_YAML.exists():
-        print(f"ERROR: {DATA_YAML} not found. Run tools/recover_dataset.py first.")
+    if not data_yaml.exists():
+        print(f"ERROR: {data_yaml} not found.")
+        print("Build a dataset first (tools/recover_dataset.py) or pass --data.")
         return 1
 
     device = args.device or resolve_device()
@@ -107,7 +123,7 @@ def main() -> int:
         "device": device,
         "base_model": BASE_MODEL,
         "architecture": "YOLOv12-nano",
-        "data": str(DATA_YAML),
+        "data": str(data_yaml),
         "epochs": args.epochs,
         "batch": args.batch,
         "imgsz": args.imgsz,
@@ -130,7 +146,7 @@ def main() -> int:
     model = YOLO(BASE_MODEL)          # downloads COCO weights on first use
     started = time.time()
     model.train(
-        data=str(DATA_YAML),
+        data=str(data_yaml),
         epochs=args.epochs,
         batch=args.batch,
         imgsz=args.imgsz,

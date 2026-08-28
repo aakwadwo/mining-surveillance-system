@@ -83,8 +83,52 @@ programs** that talk over HTTP.
    └──────────────────────────┘   └──────────────────────────────┘
 ```
 
-Deeper design notes, including why there are two Ultralytics
-implementations, are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Important:** this system detects **objects**, not crimes. See
+[What it does not do](#what-it-does-not-do).
+
+| Document | What it covers |
+|---|---|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | design decisions and why |
+| [`docs/BASELINE.md`](docs/BASELINE.md) | the frozen baseline: model, metrics, config |
+| [`docs/FUTURE_TRAINING.md`](docs/FUTURE_TRAINING.md) | the next-model pipeline, and which photographs are worth collecting |
+| [`docs/TAXONOMY_MAPPING.md`](docs/TAXONOMY_MAPPING.md) | how the recovered dataset's classes were mapped |
+| [`backend/models/PROVENANCE.md`](backend/models/PROVENANCE.md) | where every model came from |
+
+---
+
+## What it does not do
+
+**Object detection is not the same thing as determining that illegal
+mining has occurred.**
+
+The model answers one question: *what objects are visible in this
+image?* It reports excavators, tools, people, processing equipment,
+structures and vehicles.
+
+It cannot determine legality, because that depends on information not
+present in pixels:
+
+```
+OBJECT DETECTION          what the model provides
+        +
+LOCATION                  GPS / map
+        +
+PERMITS & LICENSING       is this concession authorised?
+        +
+PROTECTED BOUNDARIES      forest reserve? river buffer?
+        +
+RELEVANT LAW              what is actually prohibited here
+        +
+HUMAN REVIEW              a person makes the call
+        =
+AN ILLEGAL-MINING ASSESSMENT
+```
+
+A licensed mine contains excavators and workers too. This is enforced in
+the code: alerts fire only on machinery and processing equipment, never
+on `Person` alone, and the dashboard says *"Mining equipment present"* —
+never *"illegal"*. The model must not be described as a legal
+decision-maker.
 
 ---
 
