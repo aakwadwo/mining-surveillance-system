@@ -833,3 +833,128 @@ class TestHistoryAPI:
         })
         assert r.status_code == 201
         assert r.get_json()["event_id"] is not None
+
+
+# ===============================================================
+# J. Phase 6 audit fixes — upload limits and stale-state clearing
+# ===============================================================
+class TestUploadLimits:
+    """
+    Without a cap, one POST makes the server buffer the whole upload in
+    memory - the cheapest possible denial of service, and easy to trigger
+    by accident with a high-resolution phone photo.
+    """
+
+    def test_body_size_limit_is_configured(self):
+        import app as backend_app
+
+        assert backend_app.app.config["MAX_CONTENT_LENGTH"] == config.MAX_UPLOAD_BYTES
+        assert config.MAX_UPLOAD_BYTES > 0
+
+    def test_oversized_body_is_413_not_500(self, client):
+        """
+        413 means "your upload was too big"; 500 means "the server broke".
+        They must not be confused - this exact bug appeared while fixing
+        it, because Werkzeug's HTTPException was caught by the generic
+        handler before Flask's error handler could see it.
+        """
+        import io
+
+        payload = b"\xff\xd8\xff" + b"\x00" * (config.MAX_UPLOAD_BYTES + 1024)
+        r = client.post("/api/detect",
+                        data={"image": (io.BytesIO(payload), "big.jpg")},
+                        content_type="multipart/form-data")
+        assert r.status_code == 413, f"expected 413, got {r.status_code}"
+        assert r.get_json()["success"] is False
+
+    def test_decompression_bomb_is_rejected_on_DECODED_size(self, client):
+        """
+        A flat image compresses to almost nothing but decodes to hundreds
+        of MB. Guarding file size alone would let it straight through, so
+        the check must be on pixel count after decoding.
+        """
+        import io
+
+        import cv2
+        import numpy as np
+
+        side = int(config.MAX_IMAGE_PIXELS ** 0.5) + 500
+        flat = np.full((side, side, 3), 128, dtype=np.uint8)
+        ok, buf = cv2.imencode(".jpg", flat, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        assert ok
+        assert len(buf.tobytes()) < config.MAX_UPLOAD_BYTES, "must pass the SIZE check"
+
+        r = client.post("/api/detect",
+                        data={"image": (io.BytesIO(buf.tobytes()), "bomb.jpg")},
+                        content_type="multipart/form-data")
+        assert r.status_code == 413
+        assert "pixel" in r.get_json()["error"].lower()
+
+    def test_a_normal_frame_is_unaffected(self, client):
+        img = _a_real_test_image()
+        with img.open("rb") as fh:
+            r = client.post("/api/detect", data={"image": (fh, img.name)},
+                            content_type="multipart/form-data")
+        assert r.status_code == 200
+        assert r.get_json()["success"] is True
+
+    def test_filename_is_reduced_to_a_basename(self):
+        """
+        Defence in depth: the filename only reaches history metadata today,
+        but a traversal string must never be sitting in the database
+        waiting for some future feature to use it as a path.
+        """
+        import app as backend_app
+
+        assert backend_app._safe_filename("../../etc/passwd") == "passwd"
+        assert backend_app._safe_filename("/tmp/x.jpg") == "x.jpg"
+        assert backend_app._safe_filename(None) is None
+        assert len(backend_app._safe_filename("a" * 500)) <= 120
+
+    def test_limits_are_reported_by_config_endpoint(self, client):
+        body = client.get("/config").get_json()
+        assert body["max_upload_bytes"] == config.MAX_UPLOAD_BYTES
+        assert body["max_image_pixels"] == config.MAX_IMAGE_PIXELS
+
+
+class TestFrontendStaleStateHandling:
+    """
+    Static checks on live-detection.js. The behaviour itself was verified
+    in a browser; these guard against the logic being removed later.
+    """
+
+    SRC = (PROJECT_ROOT / "frontend" / "live-detection.js").read_text()
+
+    def test_stale_clearing_exists(self):
+        """
+        If the backend dies, the last boxes used to stay on screen looking
+        live. Showing stale results as current is the same integrity
+        problem as showing mock data as real.
+        """
+        assert "markStale()" in self.SRC
+        assert "STALE_AFTER_ERRORS" in self.SRC
+
+    def test_stale_is_triggered_from_the_error_path(self):
+        assert "this.markStale();" in self.SRC
+
+    def test_stale_clears_boxes_and_blanks_the_report(self):
+        block = self.SRC[self.SRC.index("markStale()"):self.SRC.index("stop() {")]
+        assert "this.clearBoxes()" in block
+        assert "lastResult = null" in block
+        for field in ("siteType", "environment", "confidenceValue", "suggestedAction"):
+            assert field in block, f"{field} not reset on stale"
+
+    def test_single_request_in_flight_guard_exists(self):
+        assert "this.inFlight" in self.SRC
+        assert "if (this.inFlight)" in self.SRC
+
+    def test_overlay_uses_cover_aware_scaling(self):
+        """Math.min here instead of Math.max would misplace every box."""
+        assert "Math.max(boxW / srcW, boxH / srcH)" in self.SRC
+
+    def test_resize_listener_recomputes_boxes(self):
+        assert "addEventListener('resize'" in self.SRC
+
+    def test_mock_output_is_never_shown_as_real(self):
+        assert "result.synthetic" in self.SRC
+        assert "MOCK mode" in self.SRC

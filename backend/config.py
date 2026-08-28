@@ -131,6 +131,22 @@ PORT: int = int(os.getenv("GALAMSEY_PORT", "5004"))
 
 DEBUG: bool = os.getenv("GALAMSEY_DEBUG", "0") == "1"
 
+# Largest request body accepted, in bytes.
+#
+# Without a cap, a single POST can make the server buffer the entire
+# upload in memory - the cheapest possible denial of service, and easy
+# to trigger by accident with a high-resolution phone photo. A camera
+# frame downscaled to 960px is ~60-150 KB, and a full-resolution
+# photograph is a few MB, so 16 MB is generous while still bounded.
+# Flask rejects anything larger with 413 before reading the body.
+MAX_UPLOAD_BYTES: int = int(os.getenv("GALAMSEY_MAX_UPLOAD", str(16 * 1024 * 1024)))
+
+# Largest image the detector will actually run on, in pixels. A
+# 6000x6000 JPEG decodes to ~108 MB of raw uint8 in RAM regardless of
+# how small the compressed file was ("decompression bomb"), so the
+# guard has to be on DECODED size, not file size.
+MAX_IMAGE_PIXELS: int = int(os.getenv("GALAMSEY_MAX_PIXELS", str(40_000_000)))
+
 # Origins allowed to call this API from a browser. The frontend is
 # served on 5501 (see tools/serve_frontend.sh).
 CORS_ORIGINS: list[str] = [
@@ -231,6 +247,8 @@ def as_dict() -> dict:
         "port": PORT,
         "debug": DEBUG,
         "cors_origins": CORS_ORIGINS,
+        "max_upload_bytes": MAX_UPLOAD_BYTES,
+        "max_image_pixels": MAX_IMAGE_PIXELS,
         "history_db": str(HISTORY_DB),
         "history_max_events": HISTORY_MAX_EVENTS,
         "camera_enabled": CAMERA_ENABLED,

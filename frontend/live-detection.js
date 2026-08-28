@@ -70,6 +70,11 @@
 (function () {
     'use strict';
 
+    // After this many consecutive failures the overlay is cleared, so a
+    // frozen picture of the last successful inference is never mistaken
+    // for a live one.
+    const STALE_AFTER_ERRORS = 3;
+
     class LiveDetection {
         /**
          * @param {object} dashboard the GalamseyDetector instance from script.js
@@ -121,6 +126,37 @@
             this.scheduleNext(0);
         }
 
+        /**
+         * Drop everything on screen and say why.
+         *
+         * Called when the backend has failed repeatedly. An empty overlay
+         * with an honest message is strictly better than a convincing but
+         * out-of-date one.
+         */
+        markStale() {
+            this.lastResult = null;
+            this.clearBoxes();
+
+            const setText = (id, text) => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = text;
+            };
+            setText('siteType', 'Detection unavailable');
+            setText('environment', 'Backend unreachable');
+            setText('confidenceValue', '--');
+            setText('suggestedAction',
+                    'Detection is offline. The boxes and figures shown previously ' +
+                    'are no longer current and have been cleared.');
+
+            const toolList = document.getElementById('toolList');
+            if (toolList) {
+                toolList.innerHTML =
+                    '<div class="tool-item"><span>Detection unavailable</span></div>';
+            }
+            const counter = document.querySelector('.detection-count');
+            if (counter) counter.textContent = 'detection offline';
+        }
+
         stop() {
             this.running = false;
             if (this.timer) {
@@ -165,11 +201,18 @@
                 if (this.consecutiveErrors <= 3) {
                     console.warn('[galamsey] detection cycle failed:', error.message);
                 }
-                if (this.consecutiveErrors === 3) {
+                if (this.consecutiveErrors === STALE_AFTER_ERRORS) {
                     this.dashboard.showToast(
                         'Detection backend unreachable - retrying in the background',
                         'illegal'
                     );
+                    // FIXED: the boxes and the report used to stay on screen
+                    // through an outage, so a frozen picture of the LAST
+                    // successful inference looked exactly like a live one.
+                    // Showing stale results as current is the same integrity
+                    // problem as showing mock data as real. Clear them and say
+                    // so, rather than letting the user draw a wrong conclusion.
+                    this.markStale();
                 }
             } finally {
                 this.inFlight = false;

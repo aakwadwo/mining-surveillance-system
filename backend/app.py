@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 from flask import Flask, Response, jsonify, request  # noqa: E402
+from werkzeug.exceptions import HTTPException  # noqa: E402
 from flask_cors import CORS  # noqa: E402
 
 import config  # noqa: E402
@@ -164,6 +165,10 @@ camera = CameraManager()
 # Flask
 # ---------------------------------------------------------------
 app = Flask(__name__)
+
+# Reject oversized bodies before they are read into memory.
+# Werkzeug raises RequestEntityTooLarge, handled as 413 below.
+app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_BYTES
 
 # CORS = Cross-Origin Resource Sharing. A browser refuses to let a page
 # served from origin A read a response from origin B unless B says it is
@@ -346,6 +351,21 @@ def post_detections():
 # ---------------------------------------------------------------
 # Image inference
 # ---------------------------------------------------------------
+def _safe_filename(name: str | None) -> str | None:
+    """
+    Reduce an uploaded filename to something safe to store.
+
+    The filename is only ever written into the history metadata - it
+    never touches the filesystem, so this is not a path-traversal fix.
+    It is defence in depth: if some future feature DOES use it as a
+    path, "../../etc/passwd" must not already be sitting in the
+    database waiting to be used.
+    """
+    if not name:
+        return None
+    return Path(name).name[:120] or None
+
+
 class ImageRequestError(Exception):
     """The client's request was malformed. Carries the HTTP status."""
 
@@ -391,7 +411,19 @@ def _decode_uploaded_image() -> tuple[np.ndarray, str | None]:
         raise ImageRequestError(
             "could not decode image: the bytes are not a readable image format"
         )
-    return frame, filename
+
+    # Guard the DECODED size, not the file size. A heavily-compressed
+    # image can be tiny on disk and enormous in memory - 6000x6000 pixels
+    # is ~108 MB of uint8 however small the JPEG was.
+    height, width = frame.shape[:2]
+    if width * height > config.MAX_IMAGE_PIXELS:
+        raise ImageRequestError(
+            f"image too large: {width}x{height} = {width * height:,} pixels "
+            f"exceeds the {config.MAX_IMAGE_PIXELS:,} pixel limit",
+            status=413,
+        )
+
+    return frame, _safe_filename(filename)
 
 
 def _run_inference(frame: np.ndarray, meta: dict[str, Any]) -> dict[str, Any]:
@@ -459,6 +491,13 @@ def api_detect():
         result = _run_inference(frame, {"source": "api", "filename": filename})
     except ImageRequestError as exc:
         return jsonify({"success": False, "error": exc.message}), exc.status
+    except HTTPException:
+        # Werkzeug's own errors (e.g. 413 RequestEntityTooLarge, raised
+        # when the body exceeds MAX_CONTENT_LENGTH) must reach their
+        # registered handler. Without this they were swallowed by the
+        # generic catch below and reported as a 500 - telling the client
+        # "the server broke" when the truth was "your upload was too big".
+        raise
     except Exception as exc:  # noqa: BLE001 - never leak a stack trace to a client
         logger.exception("inference failed")
         return jsonify({
@@ -512,6 +551,8 @@ def detect_image():
         result = _run_inference(frame, {"source": "upload", "filename": filename})
     except ImageRequestError as exc:
         return jsonify({"error": exc.message}), exc.status
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.exception("inference failed")
         return jsonify({"error": f"inference failed: {type(exc).__name__}"}), 500
@@ -579,6 +620,21 @@ def video_feed():
 @app.errorhandler(404)
 def not_found(_):
     return jsonify({"error": "no such endpoint", "hint": "GET / lists all endpoints"}), 404
+
+
+@app.errorhandler(413)
+def too_large(_):
+    """
+    Werkzeug raises this when the body exceeds MAX_CONTENT_LENGTH.
+    Without a handler Flask returns an HTML error page, which a JSON
+    client cannot parse - so it would look like a mysterious failure
+    rather than a clear "your upload was too big".
+    """
+    limit_mb = config.MAX_UPLOAD_BYTES / (1024 * 1024)
+    return jsonify({
+        "success": False,
+        "error": f"upload too large: the limit is {limit_mb:.0f} MB",
+    }), 413
 
 
 # ---------------------------------------------------------------
