@@ -500,6 +500,7 @@ correctly without knowing what the coordinates are relative to.
 |---|---|
 | 200 | inference ran |
 | 400 | no image / empty upload / undecodable bytes |
+| 413 | upload too large (body > 16 MB, or decoded image > 40 M pixels) |
 | 503 | the model is not loaded — **never** substituted with fake data |
 | 500 | unexpected failure (logged server-side) |
 
@@ -535,6 +536,14 @@ renders video smoothly for free, so round-tripping every frame through
 Python would make it jerky for no gain. Burned-in boxes also can't be
 restyled, hidden or made accessible — and video (smooth) and detections
 (~every 1.5 s) update at different rates.
+
+**What happens if the backend dies mid-session.** After 3 consecutive
+failures the overlay is cleared and the report is blanked to "Detection
+unavailable / Backend unreachable". A frozen picture of the last
+successful inference looks exactly like a live one, so showing it would
+be the same integrity problem as showing mock data as real. The loop
+keeps retrying with a back-off and recovers automatically — verified by
+killing the backend mid-session and restarting it.
 
 **Why only one request is ever in flight.** `setInterval(send, 100)`
 would post frames faster than ~110 ms inference can drain them; the
@@ -612,13 +621,33 @@ python3 -m venv .venv
 
 ---
 
+## Measured performance
+
+Apple M4 Pro, MPS. No optimisation was needed:
+
+| | |
+|---|---|
+| model load + warm-up | 1300 ms (one-off at startup) |
+| inference, cold | 284 ms |
+| **inference, warm** | **18.7 ms median** (20.0 ms mean) |
+| JPEG encode per frame | 0.5 ms |
+| DB insert per event | 0.37 ms |
+| DB read, 50 events | 0.56 ms |
+| peak memory | 560 MB |
+
+At the 1500 ms interval the backend is busy **1.3 %** of the time.
+(An end-to-end `/api/detect` round trip is ~30–110 ms; the extra over
+19 ms is HTTP and multipart overhead, not the model.)
+
+---
+
 ## Testing
 
 ```bash
 ./.venv/bin/python -m pytest tests/ -v
 ```
 
-56 tests, ~7 seconds, no running server required (Flask's test client
+104 tests, ~8 seconds, no running server required (Flask's test client
 exercises the app in-process). Each test guards a bug this project
 actually had.
 
@@ -631,6 +660,9 @@ actually had.
 | E Camera | healthy with no camera; `/video_feed` degrades to 503, never 500 |
 | F Frontend | no API key in tracked files, balanced HTML, CSS fixes intact |
 | G Phase 5 | dataset validates, no split leakage, manifest provenance, all labels are boxes, model loads without the fork, embedded names match exactly |
+| H Detect API | real inference, contract fields, boxes inside the image, confidence is a probability, taxonomy match, all failure modes are 400 not 500, 503 when the model is unavailable, legacy alias unchanged |
+| I History | insert, read back, survives reopening the database, empty frames skipped, de-duplication, retention cap, aggregates |
+| J Limits | body-size cap, decompression bomb rejected on decoded size, 413-not-500, filename reduction, stale-clearing / in-flight / cover-scaling logic present |
 
 Manual checks:
 
@@ -666,6 +698,8 @@ means editing source.
 | `GALAMSEY_HISTORY` | `100` | default page size for `/detections` |
 | `GALAMSEY_HISTORY_DB` | `backend/data/detections.db` | history database path |
 | `GALAMSEY_HISTORY_MAX` | `5000` | max stored events before trimming |
+| `GALAMSEY_MAX_UPLOAD` | `16777216` | largest request body (16 MB) |
+| `GALAMSEY_MAX_PIXELS` | `40000000` | largest **decoded** image, in pixels |
 
 Frontend settings live in `frontend/config.js`. **Your Maps key goes in
 `.env` at the project root** (git-ignored); the backend reads it and
