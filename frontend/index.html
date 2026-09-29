@@ -182,6 +182,100 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Sound Detection Panel (see sound-detection.js) -->
+            <div class="report-panel sound-panel" id="soundPanel">
+                <div class="panel-header">
+                    <h3>Sound Detection</h3>
+                    <div class="panel-actions sound-monitor-control">
+                        <span class="sound-monitor-title">Audio Monitoring</span>
+                        <button class="action-btn sound-toggle" id="soundMonitorToggle" aria-pressed="false"
+                                title="Listen through the microphone and analyze every 10 seconds">
+                            <i class="fas fa-microphone"></i>
+                            <span id="soundMonitorLabel">OFF</span>
+                        </button>
+                    </div>
+                    <div class="sound-service-notice" id="soundServiceNotice" hidden>
+                        <i class="fas fa-plug-circle-xmark"></i>
+                        Sound detection service unavailable
+                    </div>
+                </div>
+
+                <div class="report-content">
+                    <div class="metadata-item">
+                        <label>Status:</label>
+                        <span class="sound-status" id="soundStatus">Monitoring off</span>
+                    </div>
+
+                    <div class="metadata-item">
+                        <label>Last analyzed:</label>
+                        <span id="soundLastAnalyzed">--</span>
+                    </div>
+
+                    <!-- Open alerts: stay until acknowledged. Hidden when there are none. -->
+                    <div class="detected-tools sound-alerts" id="soundAlertsSection" hidden>
+                        <label>Detection alerts:</label>
+                        <div class="sound-alert-list" id="soundAlerts" aria-live="assertive" aria-relevant="additions">
+                            <!-- One card per unacknowledged event, newest first -->
+                        </div>
+                    </div>
+
+                    <!-- Any ticked category can raise alerts, independently of the others. -->
+                    <fieldset class="detected-tools sound-target">
+                        <legend>Detection targets:</legend>
+                        <div class="tool-list">
+                            <label class="tool-item"><input type="checkbox" name="soundTarget" value="machinery" checked><span>Machinery</span></label>
+                            <label class="tool-item"><input type="checkbox" name="soundTarget" value="vehicles"><span>Vehicles</span></label>
+                            <label class="tool-item"><input type="checkbox" name="soundTarget" value="human_activity"><span>Human Activity</span></label>
+                            <label class="tool-item"><input type="checkbox" name="soundTarget" value="environment"><span>Environment</span></label>
+                        </div>
+                        <p class="sound-no-targets" id="soundNoTargets" hidden>
+                            No detection alerts enabled. Monitoring still shows the probabilities below.
+                        </p>
+                    </fieldset>
+
+                    <div class="detected-tools">
+                        <label>Active detections:</label>
+                        <div class="tool-list" id="soundActiveDetections">
+                            <!-- Ticked categories currently at or above 50% -->
+                        </div>
+                    </div>
+
+                    <div class="detected-tools sound-predictions">
+                        <label>Predictions:</label>
+                        <div class="metadata-item" id="soundRow-machinery">
+                            <label>Machinery</label>
+                            <span id="soundProb-machinery">--</span>
+                        </div>
+                        <div class="metadata-item" id="soundRow-vehicles">
+                            <label>Vehicles</label>
+                            <span id="soundProb-vehicles">--</span>
+                        </div>
+                        <div class="metadata-item" id="soundRow-human_activity">
+                            <label>Human activity</label>
+                            <span id="soundProb-human_activity">--</span>
+                        </div>
+                        <div class="metadata-item" id="soundRow-environment">
+                            <label>Environment</label>
+                            <span id="soundProb-environment">--</span>
+                        </div>
+                    </div>
+
+                    <div class="detected-tools">
+                        <label>Detected:</label>
+                        <div class="tool-list" id="soundDetected">
+                            <!-- Filled from the API's "detected" array -->
+                        </div>
+                    </div>
+
+                    <div class="detected-tools">
+                        <label>Recent alerts:</label>
+                        <div class="tool-list" id="soundRecentAlerts">
+                            <!-- One entry per detection event, newest first -->
+                        </div>
+                    </div>
+                </div>
+            </div>
         </section>
     </main>
 
@@ -398,6 +492,7 @@
 
     <script src="script.js"></script>
     <script src="live-detection.js"></script>
+    <script src="sound-detection.js"></script>
     <script>
         // Define the Maps callback BEFORE requesting the script, so the
         // API can never call a function that does not exist yet.

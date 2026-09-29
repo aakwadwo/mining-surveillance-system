@@ -69,6 +69,20 @@ window.GALAMSEY_CONFIG = {
     SEND_DETECTIONS: true,
 
     // -----------------------------------------------------------
+    // Sound detection  (see sound-detection.js)
+    // -----------------------------------------------------------
+    // The separate mining-sound-detection FastAPI server. Its CORS
+    // allow-list only admits http://localhost:3000 and
+    // http://127.0.0.1:3000, so serve this dashboard on port 3000
+    // when using sound detection: tools/serve_frontend.sh 3000
+    SOUND_API_URL: 'http://127.0.0.1:8000',
+
+    // Length of each microphone window sent to /predict while Audio
+    // Monitoring is ON. 10 s matches the model's training clip length,
+    // so one window is exactly one clip - one API call every 10 s.
+    SOUND_WINDOW_SECONDS: 10,
+
+    // -----------------------------------------------------------
     // Google Maps
     // -----------------------------------------------------------
     // Leave EMPTY here. The key comes from the backend's /client-config
