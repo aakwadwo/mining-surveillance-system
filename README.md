@@ -4,7 +4,7 @@ A computer-vision system for detecting illegal small-scale gold mining
 (*galamsey*) activity in Ghana from camera or drone imagery, with a web
 dashboard that plots detections on a map against geofenced areas.
 
-> **Project status: live end-to-end application.**
+> **Project status: working end-to-end application, run locally.**
 > The dashboard now runs real detection on your camera:
 > `camera → /api/detect → galamsey-phase5.pt → bounding boxes`, with the
 > Detection Report, statistics and alerts all driven by the same real
@@ -15,6 +15,12 @@ dashboard that plots detections on a map against geofenced areas.
 > retrained: **test mAP50 improved from 0.200 to 0.503 (2.5×)**, with
 > every class improving. `Structure` remains unsolved (10 training
 > images). See [Current limitations](#current-limitations).
+
+**Origin.** This repository started from an inherited final-year group
+project. Commit `48bff44` preserves that baseline unmodified. The later
+work in this history is mine: dataset recovery and validation,
+retraining, the inference API, detection history, the test suite, and
+this documentation.
 
 ---
 
@@ -135,7 +141,7 @@ decision-maker.
 ## Folder structure
 
 ```
-final year ai/
+mining-surveillance-system/
 ├── frontend/                    static dashboard — no build step
 │   ├── index.html
 │   ├── script.js                one GalamseyDetector class (~4000 lines)
@@ -208,7 +214,7 @@ Ultralytics 8.3 all ship arm64 wheels for 3.12.
 ## Setup
 
 ```bash
-cd "/Users/kwadwo/Downloads/final year ai"
+cd mining-surveillance-system
 
 # 1. Create an isolated environment (a private Python + site-packages
 #    for this project only; nothing is installed system-wide).
