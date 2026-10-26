@@ -11,7 +11,7 @@ Everything here was measured, not estimated.
 |---|---|
 | Branch | `phase-6-integration` |
 | Baseline commit | see `git log -1` on this branch |
-| `main` | `48bff44` — the untouched inherited project |
+| `main` | `85395ca` — the untouched inherited project |
 | Other branches | `phase-4-cleanup`, `phase-5-data-recovery` |
 
 ---
@@ -164,7 +164,7 @@ uses the same settings.
 4. Geofence **creation** unavailable — Google removed `DrawingManager`
    in Maps JS v3.65. Not faked.
 5. Camera-permission testing cannot be automated.
-6. Google Maps key present in git history (commits `48bff44`, `d63a8dd`).
+6. Google Maps key present in git history (commits `85395ca`, `11ad493`).
 7. Prototype only — no auth, no deployment, single user.
 
 ---

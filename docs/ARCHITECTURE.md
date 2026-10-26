@@ -249,7 +249,7 @@ Supported inputs, in the order they were built:
 | API key in HTML | git-ignored `config.local.js` | keeps it out of Git — see the caveat below |
 
 **The key caveat:** a browser Maps key cannot be secret, and the
-existing one is still in commit `48bff44`. Git history is permanent;
+existing one is still in commit `85395ca`. Git history is permanent;
 removing a secret later does not remove it from an earlier commit. The
 only real remedy is **rotation in Google Cloud Console**, plus referrer
 and API restrictions and a quota cap.

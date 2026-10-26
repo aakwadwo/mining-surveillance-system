@@ -17,7 +17,7 @@ dashboard that plots detections on a map against geofenced areas.
 > images). See [Current limitations](#current-limitations).
 
 **Origin.** This repository started from an inherited final-year group
-project. Commit `48bff44` preserves that baseline unmodified. The later
+project. Commit `85395ca` preserves that baseline unmodified. The later
 work in this history is mine: dataset recovery and validation,
 retraining, the inference API, detection history, the test suite, and
 this documentation.
@@ -771,7 +771,7 @@ Real protection is in Google Cloud Console:
 3. **Billing → Budgets & alerts**: a low daily cap
 
 > ⚠️ **Rotate the existing key before pushing this repo anywhere.** It
-> is present in the first commit (`48bff44`, the untouched inherited
+> is present in the first commit (`85395ca`, the untouched inherited
 > baseline), and Git history is permanent — deleting a secret in a later
 > commit does not remove it from an earlier one. Bots scrape GitHub for
 > `AIza…` patterns within minutes.
